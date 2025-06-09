@@ -1,0 +1,628 @@
+#%%
+
+import sys
+
+sys.path.append(os.path.join(os.path.dirname(__file__), "lib"))
+from plot_heatmap import plot_heatmap
+from set_default_plot_settings import set_default_plot_settings
+from rand_matrix_c_specified_number_of_large_eigenvalues import rand_matrix_c_specified_number_of_large_eigenvalues
+
+
+import numpy as np
+import matplotlib.pyplot as plt
+import scipy
+import scipy.linalg
+import pickle
+import numpy as np
+import scipy
+from tqdm import tqdm
+import networkx as nx
+import os
+import random
+import copy
+from sklearn.manifold import TSNE
+import copy
+from sklearn.decomposition import PCA
+from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
+from sklearn.model_selection import train_test_split
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.model_selection import cross_val_score
+from sklearn.model_selection import KFold
+from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
+
+
+
+results_dir = "results"
+fs=128
+dt = 1/fs
+input_type = "cos"
+input_strength = 1e2
+T=5
+sigma = 1e-2
+dim = 8
+obs_dim = dim
+Trials = 100
+T_for_gramian = fs
+
+# Set random seed for reproducibility
+np.random.seed(42)
+random.seed(42)
+
+def make_matrix(eigenvalue_magnitude, connectivity_direction):
+    #State1 LEFT CONNECTION 安定
+    A = np.zeros((dim, dim))
+
+    # Strong connectivity for nodes 1-4
+    for i in range(4):
+        for j in range(4):
+            if i != j:
+                if connectivity_direction == "left":
+                    A[i, j] = np.random.uniform(0.5, 0.7)
+                elif connectivity_direction == "right":
+                    A[j, i] = np.random.uniform(0.4, 0.6)
+                else:
+                    A[i, j] = np.random.uniform(0.4, 0.6)
+
+    # Weak connectivity for nodes 5-8
+    for i in range(4, 8):
+        for j in range(4, 8):
+            if i != j:
+                if connectivity_direction == "left":
+                    A[i, j] = np.random.uniform(0.4, 0.6)
+                elif connectivity_direction == "right":
+                    A[j, i] = np.random.uniform(0.5, 0.7)
+                else:
+                    A[i, j] = np.random.uniform(0.4, 0.6)
+
+    # Cross-group connectivity
+    for i in range(4):
+        for j in range(4, 8):
+            A[i, j] = np.random.uniform(0.1, 0.3)
+            A[j, i] = np.random.uniform(0.1, 0.3)
+
+    for i in range(4, 8):
+        for j in range(4):
+            A[i, j] = np.random.uniform(0.1, 0.3)
+            A[j, i] = np.random.uniform(0.1, 0.3)
+
+    # Scale the matrix to achieve the desired eigenvalue magnitude
+    eigenvalues, _ = np.linalg.eig(A)
+    current_magnitude = max(abs(eigenvalues))
+    scaling_factor = eigenvalue_magnitude / current_magnitude
+    A *= scaling_factor
+    
+    return A
+
+A1 = []
+for i in range(Trials):
+    A1.append(make_matrix(0.1, "left"))
+      
+A2 = []
+for i in range(Trials):
+    A2.append(make_matrix(0.11, "left"))#State4 RIGHT CONNECTION 不安定
+
+A3 = []
+for i in range(Trials):
+    A3.append(make_matrix(0.1, "right"))
+
+A4 = []
+for i in range(Trials):
+    A4.append(make_matrix(0.11, "right"))
+    
+A5 = []
+for i in range(Trials):
+    A5.append(make_matrix(0.1, "random"))
+    
+# Compute eigenvalues for A1 to A4 and plot them along with the unit circle
+plt.figure(figsize=(10, 10))
+
+# Define colors for each group
+colors = ['red', 'blue', 'green', 'purple']
+labels = ['A1', 'A2', 'A3', 'A4']
+
+# Plot the unit circle
+unit_circle = plt.Circle((0, 0), 1, color='black', fill=False, linestyle='--', linewidth=1)
+plt.gca().add_artist(unit_circle)
+
+for idx, A_group in enumerate([A1, A2, A3, A4]):
+    eigenvalues = []
+    for A in A_group[:4]:
+        eigvals, _ = np.linalg.eig(A)
+        eigenvalues.extend(eigvals)
+    eigenvalues = np.array(eigenvalues)
+    plt.scatter(eigenvalues.real, eigenvalues.imag, alpha=0.5, label=labels[idx], color=colors[idx])
+
+plt.axhline(0, color='black', linewidth=0.5, linestyle='--')
+plt.axvline(0, color='black', linewidth=0.5, linestyle='--')
+plt.xlabel('Real Part')
+plt.ylabel('Imaginary Part')
+plt.title('Eigenvalue Scatter Plot for A1 to A4 with Unit Circle')
+plt.xlim(-1.2, 1.2)
+plt.ylim(-1.2, 1.2)
+plt.legend()
+plt.grid(alpha=0.3)
+plt.tight_layout()
+
+# Save the plot
+scatter_filename = os.path.join(results_dir, f"{__file__.split('/')[-1].split('.')[0]}_eigenvalue_scatter_with_unit_circle.svg")
+plt.savefig(scatter_filename)
+print(f"Figure saved as {scatter_filename}")
+plt.show()
+# Flatten the matrices in A1 to A5 into vectors for PCA
+flattened_A1 = [A.flatten() for A in A1]
+flattened_A2 = [A.flatten() for A in A2]
+flattened_A3 = [A.flatten() for A in A3]
+flattened_A4 = [A.flatten() for A in A4]
+flattened_A5 = [A.flatten() for A in A5]
+
+# Combine all data and create labels
+data = np.array(flattened_A1 + flattened_A2 + flattened_A3 + flattened_A4 + flattened_A5)
+labels = ['A1'] * len(flattened_A1) + ['A2'] * len(flattened_A2) + ['A3'] * len(flattened_A3) + ['A4'] * len(flattened_A4) + ['A5'] * len(flattened_A5)
+
+# Perform PCA
+pca = PCA(n_components=2)
+pca_results = pca.fit_transform(data)
+
+# Plot PCA results
+plt.figure(figsize=(10, 8))
+for label, color in zip(['A1', 'A2', 'A3', 'A4', 'A5'], ['red', 'blue', 'green', 'purple', 'orange']):
+    indices = [i for i, l in enumerate(labels) if l == label]
+    plt.scatter(pca_results[indices, 0], pca_results[indices, 1], label=label, color=color, alpha=0.6)
+
+plt.title('PCA Visualization of A1 to A5')
+plt.xlabel('PCA Dimension 1')
+plt.ylabel('PCA Dimension 2')
+plt.legend()
+plt.grid(alpha=0.3)
+plt.tight_layout()
+
+# Save the PCA plot
+pca_filename = os.path.join(results_dir, f"{__file__.split('/')[-1].split('.')[0]}_pca_plot.svg")
+plt.savefig(pca_filename)
+print(f"Figure saved as {pca_filename}")
+plt.show()
+
+# Plot network graphs for A1 to A4
+fixed_pos = {}
+# Arrange nodes 1-4 in a slightly randomized square
+for i in range(4):
+    fixed_pos[i] = (i % 2 + np.random.uniform(-0.2, 0.2), i // 2 + np.random.uniform(-0.2, 0.2))
+# Arrange nodes 5-8 in another slightly randomized square, slightly offset
+for i in range(4, 8):
+    fixed_pos[i] = ((i - 4) % 2 + 2 + np.random.uniform(-0.2, 0.2), (i - 4) // 2 + np.random.uniform(-0.2, 0.2))
+
+for idx, A_group in enumerate([A1, A2, A3, A4, A5]):
+    A = A_group[0]  # Use the first matrix in each group
+    G = nx.DiGraph(A)  # Create a directed graph from the adjacency matrix
+    
+    # Set edge weights proportional to the absolute values in the adjacency matrix
+    edges, weights = zip(*nx.get_edge_attributes(G, 'weight').items())
+    weights = [abs(A[u, v]) * 10 for u, v in edges]  # Use absolute values of weights and scale them for thickness
+    
+    plt.figure(figsize=(4, 4))
+    nx.draw(
+        G,
+        fixed_pos,
+        with_labels=True,
+        node_size=500,
+        node_color='gray',  # Node color set to black
+        edge_color='gray',  # Edge color set to black
+        width=weights,  # Set edge width proportional to scaled weights
+        arrows=False,  # Disable arrows
+        alpha=1
+    )
+    plt.tight_layout(pad=0.1)
+    graph_filename = os.path.join(results_dir, f"{__file__.split('/')[-1].split('.')[0]}_network_graph_{labels[idx]}.svg")
+    plt.savefig(graph_filename)
+    print(f"Figure saved as {graph_filename}")
+    plt.show()
+
+def plot_time_series(X, results_dir, filename):
+    set_default_plot_settings(font_size=36, dpi=200)
+    plt.figure(figsize=(9, 6))
+    for i in range(dim):
+        plt.plot(X[i, :] - i * 1, label=f'State Variable {i+1}', color='blue', alpha=1)
+    plt.xlabel('Time Steps')
+    plt.ylabel('State Variables')
+    plt.xlim([X.shape[1] // 2, X.shape[1]])
+    plt.yticks([])
+    plt.tight_layout(pad=0.1)
+    svg_filename = os.path.join(results_dir, filename)
+    plt.savefig(svg_filename, bbox_inches='tight')
+    print(f"Figure saved as {svg_filename}")
+    plt.show()
+
+# Plot time series for A1 to A5 using only the first matrix in each group
+for idx, A_group in enumerate([A1, A2, A3, A4, A5]):
+    A = A_group[0]  # Use the first matrix in each group
+    x0 = np.ones([dim, 1])
+    x = np.zeros([dim, fs * T])
+    x[:, 0] = x0[:, 0]
+
+    # Euler method to simulate the time series
+    for i in range(1, fs * T):
+        x[:, i] = A @ x[:, i - 1] + np.random.normal(0, sigma, dim)
+
+    # Plot the time series
+    plot_time_series(x, results_dir, f"{__file__.split('/')[-1].split('.')[0]}_time_series_A{idx + 1}.svg")
+
+#%%
+#Passive
+np.random.seed(42)
+random.seed(42)
+
+results_passive = {}
+
+for idx, A_group in enumerate([A1, A2, A3, A4, A5]):
+    group_label = f"A{idx + 1}"
+    fros_trial = []
+    A_optimal_trial = []
+    A_est_trials = []
+    fros_A_trial = []
+    fros_W_trial = []
+    fros_cost_trial = []
+
+    for trial in range(Trials):
+        A = A_group[trial]  # Use the corresponding matrix from the group
+        x0 = np.ones([dim, 1])
+        x = np.zeros([dim, fs * T])
+        xi = np.zeros([dim, fs * T])
+        x[:, 0] = x0[:, 0]
+
+        # Euler method to simulate the time series
+        for i in range(1, fs * T):
+            xi[:, i - 1] = np.random.normal(0, sigma, dim)
+            x[:, i] = A @ x[:, i - 1] + xi[:, i - 1]
+
+        X_ = x[:, -fs * T // 2:]
+
+        X = X_[:obs_dim, :-1]
+        Y = X_[:obs_dim, 1:]
+
+        # Estimate matrix A
+        A_est = Y @ scipy.linalg.pinv(X)
+
+        if trial == 0:
+            plot_time_series(X, results_dir, f"{__file__.split('/')[-1].split('.')[0]}_state_variables_{group_label}.svg")
+
+        A_est_trials.append(A_est)
+        fros_A_trial.append(np.linalg.norm(A - A_est, 'fro') ** 2)
+        A_optimal_trial.append(np.trace(scipy.linalg.inv(X @ X.T)))
+
+    A_est_mean = np.mean(A_est_trials, axis=0)
+    results_passive[group_label] = {
+        "A_est": A_est_trials,
+        "A_est_mean": A_est_mean,
+        "fros_A": np.mean(fros_A_trial),
+        "A_optimal": np.mean(A_optimal_trial),
+    }
+
+    print(f"{group_label} Frobenius Norm:", np.mean(fros_A_trial))
+    print(f"{group_label} A_optimal:", np.mean(A_optimal_trial))
+
+plot_PCA_and_confmat(results_passive)
+
+#%% Random Control
+np.random.seed(42)
+random.seed(42)
+
+results_random = {}
+
+for idx, A_group in enumerate([A1, A2, A3, A4, A5]):
+    group_label = f"A{idx + 1}"
+    value = 20
+    hub = 6
+
+    A_optimal_trial = []
+    A_est_trials = []
+    B_est_trials = []
+    fros_A_trial = []
+    fros_B_trial = []
+    fros_W_trial = []
+    fros_cost_trial = []
+    fros_phi_trial = []
+
+    Ys = []
+    Zs = []
+    for trial in range(Trials):
+        x0 = np.zeros([dim, 1])
+        x = np.zeros([dim, fs * T])
+        xi = np.zeros([dim, fs * T])
+        x[:, 0] = x0[:, 0]
+
+        t = np.arange(0, T, dt)
+        u0 = np.zeros(dim)
+
+        u0[hub] = 1
+
+        if input_type == "impulse":  # Impulse
+            w = np.zeros(fs * T)
+            w[fs * T // 2] = input_strength
+        elif input_type == "step":  # Step
+            w = np.ones(fs * T) * value
+        elif input_type == "cos":  # Cosine
+            omega = 2 * np.pi * value
+            w = input_strength * np.cos(omega * np.arange(0, T, dt))
+        u = np.outer(u0, w)
+
+        xi = np.zeros([dim, fs * T])
+        x[:, 0] = x0[:, 0]
+
+        # Euler method implementation
+        for i in range(1, fs * T):
+            x[:, i] = A_group[trial] @ x[:, i - 1] + np.eye(dim, dim) @ u[:, i - 1] + np.random.normal(0, sigma, dim)
+
+        X_ = x[:, -fs * T // 2:]
+        U_ = u[:, -fs * T // 2:]
+
+        X = X_[:obs_dim, :-1]
+        U = U_[:obs_dim, :-1]
+        Y = X_[:obs_dim, 1:]
+
+        Z = np.vstack([X, U])
+
+        if trial == 0:
+            plot_time_series(X_, results_dir, f"{__file__.split('/')[-1].split('.')[0]}_state_variables_random_{group_label}.svg")
+
+        Ys.append(Y)
+        Zs.append(Z)
+
+        Phi_est = Y @ scipy.linalg.pinv(Z)
+
+        A_est = Phi_est[:, :obs_dim]
+        B_est = Phi_est[:, obs_dim:]
+
+        A_est_trials.append(A_est)
+        B_est_trials.append(B_est)
+
+        frobenius_norm_A = np.linalg.norm(A_group[trial] - A_est, 'fro') ** 2
+        fros_A_trial.append(frobenius_norm_A)
+
+        frobenius_norm_B = np.linalg.norm(np.eye(dim, dim) - B_est, 'fro') ** 2
+        fros_B_trial.append(frobenius_norm_B)
+
+        frobenius_norm_phi = np.linalg.norm(Phi_est - np.hstack([A_group[trial], np.eye(dim, dim)]), 'fro') ** 2
+        fros_phi_trial.append(frobenius_norm_phi)
+
+        A_optimal_trial.append(np.trace(scipy.linalg.pinv(Z @ Z.T)))
+
+    results_random[f"{group_label}"] = {
+        "A_est": A_est_trials,
+    }
+
+
+#%% Optimal Control Design
+np.random.seed(42)
+random.seed(42)
+
+results_best = copy.deepcopy(results_random)
+frequencies = np.linspace(1, fs // 2, 100)  # Test frequencies
+
+results_optimal = {str(i): {} for i in range(1, 3)}
+
+for design_number in range(1, 3):
+    best_frequencies = {}
+    best_hubs = {}
+
+    for group_label, A_group in zip(['A1', 'A2', 'A3', 'A4', 'A5'], [A1, A2, A3, A4, A5]):
+        best_frequency = None
+        min_error = float('inf')
+
+        for freq in tqdm(frequencies, desc=f"Optimizing frequency for {group_label}"):
+            A_est_trials = []
+            for trial in range(Trials):
+                x0 = np.zeros([dim, 1])
+                x = np.zeros([dim, fs * T])
+                xi = np.zeros([dim, fs * T])
+                x[:, 0] = x0[:, 0]
+
+                t = np.arange(0, T, dt)
+                u0 = np.zeros(dim)
+                u0[hub] = 1
+
+                # Generate cosine input with the current frequency
+                omega = 2 * np.pi * freq
+                w = input_strength * np.cos(omega * np.arange(0, T, dt))
+                u = np.outer(u0, w)
+
+                # Euler method to simulate the system
+                for i in range(1, fs * T):
+                    x[:, i] = results_best[f"{group_label}"]["A_est"][trial] @ x[:, i - 1] + np.eye(dim) @ u[:, i - 1]
+
+                X_ = x[:, -fs * T // 2:]
+                U_ = u[:, -fs * T // 2:]
+
+                X = X_[:obs_dim, :-1]
+                U = U_[:obs_dim, :-1]
+                Y = X_[:obs_dim, 1:]
+
+                Z = np.vstack([X, U])
+
+                Phi_est = Y @ scipy.linalg.pinv(Z)
+                A_est = Phi_est[:, :obs_dim]
+                A_est_trials.append(A_est)
+
+            # Compute the mean estimated A and its Frobenius norm error
+            A_est_mean = np.mean(A_est_trials, axis=0)
+            error = np.linalg.norm(results_best[f"{group_label}"]["A_est"][trial] - A_est_mean, 'fro')
+
+            if error < min_error:
+                min_error = error
+                best_frequency = freq
+
+        best_frequencies[group_label] = best_frequency
+        print(f"{group_label} - Best frequency: {best_frequency} Hz with minimum error: {min_error}")
+        # Optimize input vector based on the best A_est
+        G = copy.deepcopy(results_best[f"{group_label}"]["A_est"][trial])
+        np.fill_diagonal(G, 0)
+        weighted_degree_centrality = np.sum(np.abs(G), axis=0)
+        hub = np.argmax(weighted_degree_centrality)
+        best_hubs[group_label] = hub
+
+    for group_label, A_group in zip(['A1', 'A2', 'A3', 'A4', 'A5'], [A1, A2, A3, A4, A5]):
+        value = best_frequencies[group_label]
+        hub = best_hubs[group_label]
+
+        A_optimal_trial = []
+        A_est_trials = []
+        B_est_trials = []
+        fros_A_trial = []
+        fros_B_trial = []
+        fros_W_trial = []
+        fros_cost_trial = []
+        fros_phi_trial = []
+
+        Ys = []
+        Zs = []
+        for trial in range(Trials):
+            x0 = np.zeros([dim, 1])
+            x = np.zeros([dim, fs * T])
+            xi = np.zeros([dim, fs * T])
+            x[:, 0] = x0[:, 0]
+
+            t = np.arange(0, T, dt)
+            u0 = np.zeros(dim)
+
+            u0[hub] = 1
+
+            if input_type == "impulse":  # Impulse
+                w = np.zeros(fs * T)
+                w[fs * T // 2] = input_strength
+            elif input_type == "step":  # Step
+                w = np.ones(fs * T) * value
+            elif input_type == "cos":  # Cosine
+                omega = 2 * np.pi * value
+                w = input_strength * np.cos(omega * np.arange(0, T, dt))
+            u = np.outer(u0, w)
+
+            xi = np.zeros([dim, fs * T])
+            x[:, 0] = x0[:, 0]
+
+            # Euler method implementation
+            for i in range(1, fs * T):
+                x[:, i] = A_group[trial] @ x[:, i - 1] + np.eye(dim, dim) @ u[:, i - 1] + np.random.normal(0, sigma, dim)
+
+            X_ = x[:, -fs * T // 2:]
+            U_ = u[:, -fs * T // 2:]
+
+            X = X_[:obs_dim, :-1]
+            U = U_[:obs_dim, :-1]
+            Y = X_[:obs_dim, 1:]
+
+            Z = np.vstack([X, U])
+
+            if trial == 0:
+                plot_time_series(X_, results_dir, f"{__file__.split('/')[-1].split('.')[0]}_state_variables_random_{group_label}.svg")
+
+            Ys.append(Y)
+            Zs.append(Z)
+
+            Phi_est = Y @ scipy.linalg.pinv(Z)
+
+            A_est = Phi_est[:, :obs_dim]
+            B_est = Phi_est[:, obs_dim:]
+
+            A_est_trials.append(A_est)
+            B_est_trials.append(B_est)
+
+            frobenius_norm_A = np.linalg.norm(A_group[trial] - A_est, 'fro') ** 2
+            fros_A_trial.append(frobenius_norm_A)
+
+            frobenius_norm_B = np.linalg.norm(np.eye(dim, dim) - B_est, 'fro') ** 2
+            fros_B_trial.append(frobenius_norm_B)
+
+            frobenius_norm_phi = np.linalg.norm(Phi_est - np.hstack([A_group[trial], np.eye(dim, dim)]), 'fro') ** 2
+            fros_phi_trial.append(frobenius_norm_phi)
+
+            A_optimal_trial.append(np.trace(scipy.linalg.pinv(Z @ Z.T)))
+
+        results_optimal[f"{design_number}"][f"{group_label}"] = {
+            "A_est": A_est_trials,
+        }
+
+
+#%%
+
+def plot_PCA_and_confmat(result):
+    # Perform PCA on A_est from results_passive
+    pca_data = []
+    pca_labels = []
+
+    for group_label in ['A1', 'A2', 'A3', 'A4', 'A5']:
+        for A_est in result[group_label]["A_est"]:
+            pca_data.append(A_est.flatten())
+            pca_labels.append(group_label)
+
+    pca_data = np.array(pca_data)
+
+    # Perform PCA
+    pca = PCA(n_components=2)
+    pca_results = pca.fit_transform(pca_data)
+
+    # Plot PCA results
+    plt.figure(figsize=(10, 8))
+    for label, color in zip(['A1', 'A2', 'A3', 'A4', 'A5'], ['red', 'blue', 'green', 'purple', 'orange']):
+        indices = [i for i, l in enumerate(pca_labels) if l == label]
+        plt.scatter(pca_results[indices, 0], pca_results[indices, 1], label=label, color=color, alpha=0.6)
+
+    plt.title('PCA Visualization of A_est from Passive Results')
+    plt.xlabel('PCA Dimension 1')
+    plt.ylabel('PCA Dimension 2')
+    plt.legend()
+    plt.grid(alpha=0.3)
+    plt.tight_layout()
+
+    # Save the PCA plot
+    pca_filename = os.path.join(results_dir, f"{__file__.split('/')[-1].split('.')[0]}_passive_A_est_pca_plot.svg")
+    plt.savefig(pca_filename)
+    print(f"Figure saved as {pca_filename}")
+    plt.show()
+
+    # Prepare data for classification
+    data = np.array(flattened_A1 + flattened_A2 + flattened_A3 + flattened_A4 + flattened_A5)
+    labels = np.array(['A1'] * len(flattened_A1) + 
+                    ['A2'] * len(flattened_A2) + 
+                    ['A3'] * len(flattened_A3) + 
+                    ['A4'] * len(flattened_A4) + 
+                    ['A5'] * len(flattened_A5))
+
+    # Train a classifier with 10-fold cross-validation
+    clf = LinearDiscriminantAnalysis()
+    predicted_labels = []
+    true_labels = []
+
+    # Perform 10-fold cross-validation
+    for train_index, test_index in KFold(n_splits=10, shuffle=True, random_state=42).split(data):
+        X_train, X_test = data[train_index], data[test_index]
+        y_train, y_test = labels[train_index], labels[test_index]
+
+        # Train the classifier
+        clf.fit(X_train, y_train)
+
+        # Predict on the test set
+        y_pred = clf.predict(X_test)
+
+        # Collect predictions and true labels
+        predicted_labels.extend(y_pred)
+        true_labels.extend(y_test)
+
+    # Calculate and print the mean accuracy
+    mean_accuracy = np.mean(np.array(predicted_labels) == np.array(true_labels))
+    print(f"10-Fold Cross-Validation Accuracy: {mean_accuracy:.2%}")
+
+    # Compute confusion matrix
+    cm = confusion_matrix(true_labels, predicted_labels, labels=['A1', 'A2', 'A3', 'A4', 'A5'])
+
+    # Plot the confusion matrix
+    disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=['A1', 'A2', 'A3', 'A4', 'A5'])
+    disp.plot(cmap=plt.cm.Blues)
+    plt.title(f"Confusion Matrix (10-Fold CV Accuracy: {mean_accuracy:.2%})")
+    plt.tight_layout()
+    plt.show()
+    
+plot_PCA_and_confmat(results_passive)
+plot_PCA_and_confmat(results_random)
+plot_PCA_and_confmat(results_optimal["1"])
+plot_PCA_and_confmat(results_optimal["2"])
+
+# %%
