@@ -30,8 +30,6 @@ from sklearn.model_selection import cross_val_score
 from sklearn.model_selection import KFold
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
 
-
-
 results_dir = "results"
 fs=128
 dt = 1/fs
@@ -560,7 +558,8 @@ def plot_PCA_and_confmat(result):
     pca_results = pca.fit_transform(pca_data)
 
     # Plot PCA results
-    plt.figure(figsize=(10, 8))
+    set_default_plot_settings(font_size=24, fig_size=[10,10], dpi=250, 
+                              line_color='blue',axes_limit=(-2,2),line_width=1)
     for label, color in zip(['A1', 'A2', 'A3', 'A4', 'A5'], ['red', 'blue', 'green', 'purple', 'orange']):
         indices = [i for i, l in enumerate(pca_labels) if l == label]
         plt.scatter(pca_results[indices, 0], pca_results[indices, 1], label=label, color=color, alpha=0.6)
