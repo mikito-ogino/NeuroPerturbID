@@ -183,7 +183,7 @@ for input_type in ["passive", "impulse", "cos"]:
     
     # Plot time series of X
     set_default_plot_settings(font_size=24, dpi=200)
-    fig, axs = plt.subplots(4, 1, figsize=(5, 6), sharex=True)
+    fig, axs = plt.subplots(4, 1, figsize=(5, 4), sharex=True)
     colors = plt.cm.viridis(np.linspace(0, 1, X.shape[1]))
 
     lim = 3
@@ -268,6 +268,36 @@ for input_type in ["passive", "impulse", "cos"]:
 
     # Save the heatmap as an SVG file
     heatmap_filename = os.path.join(results_dir, f"{__file__.split('/')[-1].split('.')[0]}_A_est_heatmap_{input_type}_dim{dim}.svg")
+    plt.savefig(heatmap_filename, bbox_inches='tight', pad_inches=0.05)
+    print(f"Heatmap saved as {heatmap_filename}")
+    
+    set_default_plot_settings(font_size=24, dpi=200)
+    plt.figure(figsize=(5, 5))
+    plt.imshow(np.abs(A_est - A_true), cmap='Reds', interpolation='nearest', vmin=0, vmax=1)
+
+    # Set ticks at the middle of each element
+    plt.xticks(ticks=np.arange(A_est.shape[1]), labels=range(1, A_est.shape[1] + 1))
+    plt.yticks(ticks=np.arange(A_est.shape[0]), labels=range(1, A_est.shape[0] + 1))
+
+    # Set labels
+    plt.xlabel('Dimension')
+    plt.ylabel('Dimension')
+
+    # Display the values on the heatmap
+    for i in range(A_est.shape[0]):
+        for j in range(A_est.shape[1]):
+            value = np.abs(A_est[i, j] - A_true[i, j])
+            if value == 0:
+                plt.text(j, i, f"0.00", ha='center', va='center', color='black', fontsize=18)
+            elif abs(value) < 1e-2:
+                plt.text(j, i, f"0.00", ha='center', va='center', color='black', fontsize=18)
+            else:
+                plt.text(j, i, f"{value:.2f}", ha='center', va='center', color='black', fontsize=18)
+
+    plt.tight_layout(pad=0.05)
+
+    # Save the heatmap as an SVG file
+    heatmap_filename = os.path.join(results_dir, f"{__file__.split('/')[-1].split('.')[0]}_A_error_heatmap_{input_type}_dim{dim}.svg")
     plt.savefig(heatmap_filename, bbox_inches='tight', pad_inches=0.05)
     print(f"Heatmap saved as {heatmap_filename}")
 

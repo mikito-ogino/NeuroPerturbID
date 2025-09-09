@@ -32,6 +32,8 @@ from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
 from sklearn.metrics import roc_auc_score
 from sklearn.preprocessing import label_binarize
 from sklearn.metrics import roc_curve
+from sklearn.manifold import MDS
+from scipy.spatial.distance import pdist, squareform
 
 set_default_plot_settings(font_size=24, fig_size=[6,6], dpi=250, 
                             line_color='blue',axes_limit=(-2,2),line_width=1)
@@ -116,76 +118,6 @@ for i in range(Trials):
 A5 = []
 for i in range(Trials):
     A5.append(make_matrix(0.9, "random"))
-    
-#%%
-# Compute eigenvalues for A1 to A4 and plot them along with the unit circle
-# plt.figure(figsize=(10, 10))
-
-# # Define colors for each group
-# colors = ['red', 'blue', 'green', 'purple']
-# labels = ['A1', 'A2', 'A3', 'A4']
-
-# # Plot the unit circle
-# unit_circle = plt.Circle((0, 0), 1, color='black', fill=False, linestyle='--', linewidth=1)
-# plt.gca().add_artist(unit_circle)
-
-# for idx, A_group in enumerate([A1, A2, A3, A4]):
-#     eigenvalues = []
-#     for A in A_group[:4]:
-#         eigvals, _ = np.linalg.eig(A)
-#         eigenvalues.extend(eigvals)
-#     eigenvalues = np.array(eigenvalues)
-#     plt.scatter(eigenvalues.real, eigenvalues.imag, alpha=0.5, label=labels[idx], color=colors[idx])
-
-# plt.axhline(0, color='black', linewidth=0.5, linestyle='--')
-# plt.axvline(0, color='black', linewidth=0.5, linestyle='--')
-# plt.xlabel('Real Part')
-# plt.ylabel('Imaginary Part')
-# plt.title('Eigenvalue Scatter Plot for A1 to A4 with Unit Circle')
-# plt.xlim(-1.2, 1.2)
-# plt.ylim(-1.2, 1.2)
-# plt.legend()
-# plt.grid(alpha=0.3)
-# plt.tight_layout()
-
-# Save the plot
-# scatter_filename = os.path.join(results_dir, f"{__file__.split('/')[-1].split('.')[0]}_eigenvalue_scatter_with_unit_circle.svg")
-# plt.savefig(scatter_filename)
-# print(f"Figure saved as {scatter_filename}")
-# plt.show()
-# # Flatten the matrices in A1 to A5 into vectors for PCA
-# flattened_A1 = [A.flatten() for A in A1]
-# flattened_A2 = [A.flatten() for A in A2]
-# flattened_A3 = [A.flatten() for A in A3]
-# flattened_A4 = [A.flatten() for A in A4]
-# flattened_A5 = [A.flatten() for A in A5]
-
-# # Combine all data and create labels
-# data = np.array(flattened_A1 + flattened_A2 + flattened_A3 + flattened_A4 + flattened_A5)
-# labels = ['A1'] * len(flattened_A1) + ['A2'] * len(flattened_A2) + ['A3'] * len(flattened_A3) + ['A4'] * len(flattened_A4) + ['A5'] * len(flattened_A5)
-
-# # Perform PCA
-# pca = PCA(n_components=2)
-# pca_results = pca.fit_transform(data)
-
-# # Plot PCA results
-# plt.figure(figsize=(10, 8))
-# for label, color in zip(['A1', 'A2', 'A3', 'A4', 'A5'], ['red', 'blue', 'green', 'purple', 'orange']):
-#     indices = [i for i, l in enumerate(labels) if l == label]
-#     plt.scatter(pca_results[indices, 0], pca_results[indices, 1], label=label, color=color, alpha=0.6)
-
-# plt.title('PCA Visualization of A1 to A5')
-# plt.xlabel('PCA Dimension 1')
-# plt.ylabel('PCA Dimension 2')
-# plt.legend()
-# plt.grid(alpha=0.3)
-# plt.tight_layout()
-
-# # Save the PCA plot
-# pca_filename = os.path.join(results_dir, f"{__file__.split('/')[-1].split('.')[0]}_pca_plot.svg")
-# plt.savefig(pca_filename)
-# print(f"Figure saved as {pca_filename}")
-# plt.show()
 
 # Compute the eigenvalues for each matrix in A1 to A5
 eigenvalues = {
@@ -279,11 +211,42 @@ def plot_time_series(X, results_dir, filename):
     print(f"Figure saved as {svg_filename}")
     plt.show()
 
+# Find most excitable node for each A_group
+min_indices = []
+for idx, A_group in enumerate([A1, A2, A3, A4, A5]):
+    Js = []
+    for node_index in range(dim):
+        u0 = np.zeros(dim)
+        u0[node_index] = 10  # Set the excitation to the current node
+        A = A_group[0]  # Use the first matrix in the group
+        x0 = np.ones([dim, 1])
+        x = np.zeros([dim, fs * 100])
+        x[:, 0] = x0[:, 0]
+
+        # Euler method to simulate the time series
+        for i in range(1, fs * 100):
+            if i == fs * 100 // 2 + 3:
+                x[:, i] = A @ x[:, i - 1] + u0
+            else:
+                x[:, i] = A @ x[:, i - 1]
+
+        # Compute the trace of the covariance matrix of x
+        cov_matrix = np.cov(x)
+        Js.append(np.trace(scipy.linalg.inv(cov_matrix)))
+
+    # Find the index of the smallest element in Js for the current A_group
+    min_index = np.argmin(Js)
+    min_indices.append(min_index)
+    print(f"A_group {idx + 1}: Js = {Js}, min_index = {min_index}")
+
 # Plot time series for A1 to A5 using only the first matrix in each group as subplots
 fig, axes = plt.subplots(1, 5, figsize=(16, 4))  # Create a 1x5 subplot layout
 colors = ['red', 'blue', 'green', 'purple', 'orange']  # Colors matching PCA
 
 for idx, A_group in enumerate([A1, A2, A3, A4, A5]):
+    u0 = np.zeros(dim)
+    u0[min_indices[idx]] = 10  # Set the excitation to the current node
+
     A = A_group[0]  # Use the first matrix in each group
     x0 = np.ones([dim, 1])
     x = np.zeros([dim, fs * 100])
@@ -292,7 +255,7 @@ for idx, A_group in enumerate([A1, A2, A3, A4, A5]):
     # Euler method to simulate the time series
     for i in range(1, fs * 100):
         if i == fs * 100 // 2 + 3:
-            x[:, i] = A @ x[:, i - 1] + 10 + np.random.normal(0, 1e-1, dim)
+            x[:, i] = A @ x[:, i - 1] + u0 + np.random.normal(0, 1e-1, dim)
         else:
             x[:, i] = A @ x[:, i - 1] + np.random.normal(0, 1e-1, dim)
 
@@ -427,7 +390,7 @@ for idx, A_group in enumerate([A1, A2, A3, A4, A5]):
         t = np.arange(0, T, dt)
         u0 = np.zeros(dim)
 
-        u0[:] = 1
+        u0[min_indices[idx]] = 1
 
         if input_type == "impulse":  # Impulse
             w = np.zeros(fs * T)
@@ -485,62 +448,65 @@ for idx, A_group in enumerate([A1, A2, A3, A4, A5]):
         "plot_name": "impulse"
     }
 
-# Perform PCA on A_est from results_passive and results_random
-pca_data_passive = []
-pca_labels_passive = []
+# Perform MDS on A_est from results_passive and results_random
 
-pca_data_random = []
-pca_labels_random = []
+mds_data_passive = []
+mds_labels_passive = []
+
+mds_data_random = []
+mds_labels_random = []
 
 for group_label in ['A1', 'A2', 'A3', 'A4', 'A5']:
     for A_est in results_passive[group_label]["A_est"]:
-        pca_data_passive.append(A_est.flatten())
-        pca_labels_passive.append(group_label)
+        mds_data_passive.append(A_est.flatten())
+        mds_labels_passive.append(group_label)
     for A_est in results_random[group_label]["A_est"]:
-        pca_data_random.append(A_est.flatten())
-        pca_labels_random.append(group_label)
+        mds_data_random.append(A_est.flatten())
+        mds_labels_random.append(group_label)
 
-pca_data_passive = np.array(pca_data_passive)
-pca_data_random = np.array(pca_data_random)
+mds_data_passive = np.array(mds_data_passive)
+mds_data_random = np.array(mds_data_random)
 
-# Perform PCA
-pca_passive = PCA(n_components=2)
-pca_results_passive = pca_passive.fit_transform(pca_data_passive)
+# Compute pairwise distances and perform MDS
+distance_matrix_passive = squareform(pdist(mds_data_passive, metric='euclidean'))
+mds_passive = MDS(n_components=2, dissimilarity='precomputed', random_state=42)
+mds_results_passive = mds_passive.fit_transform(distance_matrix_passive)
 
-pca_random = PCA(n_components=2)
-pca_results_random = pca_random.fit_transform(pca_data_random)
+distance_matrix_random = squareform(pdist(mds_data_random, metric='euclidean'))
+mds_random = MDS(n_components=2, dissimilarity='precomputed', random_state=42)
+mds_results_random = mds_random.fit_transform(distance_matrix_random)
 
-# Plot PCA results side by side
+# Plot MDS results side by side
 set_default_plot_settings(font_size=24, fig_size=[18, 6], dpi=250, 
                           line_color='blue', axes_limit=(-2, 2), line_width=1)
 
 fig, axes = plt.subplots(1, 2, figsize=(15, 6))
 
-# Passive PCA plot
+# Passive MDS plot
 for label, color in zip(['A1', 'A2', 'A3', 'A4', 'A5'], ['red', 'blue', 'green', 'purple', 'orange']):
-    indices = [i for i, l in enumerate(pca_labels_passive) if l == label]
-    axes[0].scatter(pca_results_passive[indices, 0], pca_results_passive[indices, 1], label=f"State {int(label[1])}", color=color, alpha=0.6)
-axes[0].set_xlabel('PCA Dimension 1')
-axes[0].set_ylabel('PCA Dimension 2')
+    indices = [i for i, l in enumerate(mds_labels_passive) if l == label]
+    axes[0].scatter(mds_results_passive[indices, 0], mds_results_passive[indices, 1], label=f"State {int(label[1])}", color=color, alpha=0.6)
+axes[0].set_xlabel('MDS 1')
+axes[0].set_ylabel('MDS 2')
 axes[0].set_title('Passive')
 axes[0].grid(alpha=0.3)
 
-# Random PCA plot
+# Random MDS plot
 for label, color in zip(['A1', 'A2', 'A3', 'A4', 'A5'], ['red', 'blue', 'green', 'purple', 'orange']):
-    indices = [i for i, l in enumerate(pca_labels_random) if l == label]
-    axes[1].scatter(pca_results_random[indices, 0], pca_results_random[indices, 1], label=f"State {int(label[1])}", color=color, alpha=0.6)
-axes[1].set_xlabel('PCA Dimension 1')
-axes[1].set_ylabel('PCA Dimension 2')
+    indices = [i for i, l in enumerate(mds_labels_random) if l == label]
+    axes[1].scatter(mds_results_random[indices, 0], mds_results_random[indices, 1], label=f"State {int(label[1])}", color=color, alpha=0.6)
+axes[1].set_xlabel('MDS 1')
+axes[1].set_ylabel('MDS 2')
 axes[1].legend(bbox_to_anchor=(1.05, 1), loc='upper left')
 axes[1].grid(alpha=0.3)
 axes[1].set_title('Perturbation')
 
 plt.tight_layout()
 
-# Save the PCA plot
-pca_filename = os.path.join(results_dir, f"{__file__.split('/')[-1].split('.')[0]}_A_est_pca_comparison.svg")
-plt.savefig(pca_filename, pad_inches=0.05)
-print(f"Figure saved as {pca_filename}")
+# Save the MDS plot
+mds_filename = os.path.join(results_dir, f"{__file__.split('/')[-1].split('.')[0]}_A_est_mds_comparison.svg")
+plt.savefig(mds_filename, pad_inches=0.05)
+print(f"Figure saved as {mds_filename}")
 plt.show()
 
 # Prepare data for classification using results_passive and results_random
@@ -739,46 +705,149 @@ compute_and_plot_roc_side_by_side(y_true_binarized_passive, y_scores_passive,
                                   y_true_binarized_random, y_scores_random, 
                                   results_dir)
 
-# # Compare true A, results_passive A, and results_random A as heatmaps
-# for idx, A_group in enumerate([A1, A2, A3, A4, A5]):
-#     group_label = f"A{idx + 1}"
-#     for trial in [0]:
-#         true_A = A_group[trial]
-#         passive_A = results_passive[group_label]["A_est"][trial]
-#         random_A = results_random[group_label]["A_est"][trial]
 
-#         fig, axes = plt.subplots(1, 3, figsize=(15, 5))
-#         vmin = min(true_A.min(), passive_A.min(), random_A.min())
-#         vmax = max(true_A.max(), passive_A.max(), random_A.max())
+#%% Passive Time Change
 
-#         # Plot true A
-#         im1 = axes[0].imshow(true_A, cmap='viridis', vmin=vmin, vmax=vmax)
-#         axes[0].set_title(f"True A ({group_label}, Trial {trial + 1})")
-#         axes[0].set_xlabel("Columns")
-#         axes[0].set_ylabel("Rows")
+#Passive
+np.random.seed(42)
+random.seed(42)
 
-#         # Plot passive A
-#         im2 = axes[1].imshow(passive_A, cmap='viridis', vmin=vmin, vmax=vmax)
-#         axes[1].set_title(f"Passive A ({group_label}, Trial {trial + 1})")
-#         axes[1].set_xlabel("Columns")
-#         axes[1].set_ylabel("Rows")
+# Define the range of TotalTime values
+# time_range = [5, 1000, 2000]
+time_range = [5, 100, 1000, 10000]
 
-#         # Plot random A
-#         im3 = axes[2].imshow(random_A, cmap='viridis', vmin=vmin, vmax=vmax)
-#         axes[2].set_title(f"Random A ({group_label}, Trial {trial + 1})")
-#         axes[2].set_xlabel("Columns")
-#         axes[2].set_ylabel("Rows")
+timechange_passives_file = os.path.join(results_dir, "timechange_passives.pkl")
 
-#         # Add colorbar
-#         fig.colorbar(im1, ax=axes, orientation='vertical', fraction=0.02, pad=0.04)
+# Check if the pickle file exists
+if os.path.exists(timechange_passives_file):
+    print(f"Loading timechange_passives from {timechange_passives_file}")
+    with open(timechange_passives_file, "rb") as f:
+        timechange_passives = pickle.load(f)
+else:
+    print(f"Processing TotalTime and saving to {timechange_passives_file}")
+    timechange_passives = []
+    for TotalTime in tqdm(time_range, desc="Processing TotalTime"):
 
-#         plt.tight_layout()
-#         heatmap_filename = os.path.join(
-#             results_dir,
-#             f"{__file__.split('/')[-1].split('.')[0]}_heatmap_comparison_{group_label}_trial_{trial + 1}.svg"
-#         )
-#         plt.savefig(heatmap_filename)
-#         print(f"Figure saved as {heatmap_filename}")
-#         plt.show()
+        results_passive = {}
 
+        for idx, A_group in enumerate([A1, A2, A3, A4, A5]):
+            group_label = f"A{idx + 1}"
+            fros_trial = []
+            A_optimal_trial = []
+            A_est_trials = []
+            fros_A_trial = []
+            fros_W_trial = []
+            fros_cost_trial = []
+
+            for trial in range(Trials):
+                A = A_group[trial]  # Use the corresponding matrix from the group
+                x0 = np.ones([dim, 1])
+                x = np.zeros([dim, fs * TotalTime])
+                xi = np.zeros([dim, fs * TotalTime])
+                x[:, 0] = x0[:, 0]
+
+                # Euler method to simulate the time series
+                for i in range(1, fs * TotalTime):
+                    xi[:, i - 1] = np.random.normal(0, sigma, dim)
+                    x[:, i] = A @ x[:, i - 1] + xi[:, i - 1]
+
+                X_ = x[:, -fs * TotalTime // 2:]
+
+                X = X_[:obs_dim, :-1]
+                Y = X_[:obs_dim, 1:]
+
+                # Estimate matrix A
+                A_est = Y @ scipy.linalg.pinv(X)
+
+                A_est_trials.append(A_est)
+                fros_A_trial.append(np.linalg.norm(A - A_est, 'fro') ** 2)
+                A_optimal_trial.append(np.trace(scipy.linalg.inv(X @ X.T)))
+
+            A_est_mean = np.mean(A_est_trials, axis=0)
+            results_passive[group_label] = {
+                "A_est": A_est_trials,
+                "A_est_mean": A_est_mean,
+                "fros_A": np.mean(fros_A_trial),
+                "A_optimal": np.mean(A_optimal_trial),
+                "plot_name": "passive"
+            }
+
+        timechange_passives.append(copy.deepcopy(results_passive))
+
+    # Save the results to a pickle file
+    with open(timechange_passives_file, "wb") as f:
+        pickle.dump(timechange_passives, f)
+    print(f"Saved timechange_passives to {timechange_passives_file}")
+
+
+
+# Perform MDS and Classification for each time change in timechange_passives
+fig, axes = plt.subplots(1, len(time_range), figsize=(6* len(time_range), 6))
+
+for idx, results_passive in enumerate(tqdm(timechange_passives, desc="Processing Time Changes")):
+    # Prepare data for MDS
+    mds_data = []
+    mds_labels = []
+    for group_label in ['A1', 'A2', 'A3', 'A4', 'A5']:
+        for A_est in results_passive[group_label]["A_est"]:
+            mds_data.append(A_est.flatten())
+            mds_labels.append(group_label)
+    mds_data = np.array(mds_data)
+
+    # Compute pairwise distances and perform MDS
+    distance_matrix = squareform(pdist(mds_data, metric='euclidean'))
+    mds = MDS(n_components=2, dissimilarity='precomputed', random_state=42)
+    mds_results = mds.fit_transform(distance_matrix)
+
+    # Prepare data for classification
+    data = []
+    labels = []
+    for group_label in ['A1', 'A2', 'A3', 'A4', 'A5']:
+        for A_est in results_passive[group_label]["A_est"]:
+            data.append(A_est.flatten())
+            labels.append(group_label)
+    data = np.array(data)
+    labels = np.array(labels)
+
+    # Train classifier with 10-fold cross-validation
+    clf = LinearDiscriminantAnalysis()
+    predicted_labels = []
+    true_labels = []
+
+    for train_index, test_index in KFold(n_splits=10, shuffle=True, random_state=42).split(data):
+        X_train, X_test = data[train_index], data[test_index]
+        y_train, y_test = labels[train_index], labels[test_index]
+
+        # Train the classifier
+        clf.fit(X_train, y_train)
+
+        # Predict on the test set
+        y_pred = clf.predict(X_test)
+
+        # Collect predictions and true labels
+        predicted_labels.extend(y_pred)
+        true_labels.extend(y_test)
+
+    # Calculate the mean accuracy
+    mean_accuracy = np.mean(np.array(predicted_labels) == np.array(true_labels))
+
+    # Plot MDS results
+    for label, color in zip(['A1', 'A2', 'A3', 'A4', 'A5'], ['red', 'blue', 'green', 'purple', 'orange']):
+        indices = [i for i, l in enumerate(mds_labels) if l == label]
+        axes[idx].scatter(mds_results[indices, 0], mds_results[indices, 1], label=f"State {int(label[1])}", color=color, alpha=0.6)
+    if time_range[idx] == 5:
+        axes[idx].set_title(f"T : {time_range[idx]}, ACC : {mean_accuracy_passive:.2%}")
+    else:
+        axes[idx].set_title(f"T : {time_range[idx]}, ACC : {mean_accuracy:.2%}")        
+    axes[idx].set_xlabel("MDS 1")
+    axes[idx].set_ylabel("MDS 2")
+    axes[idx].grid(alpha=0.3)
+
+plt.tight_layout()
+
+# Save the combined MDS and classification plot
+timechange_filename = os.path.join(results_dir, f"{__file__.split('/')[-1].split('.')[0]}_timechange_mds_classification.svg")
+plt.savefig(timechange_filename, pad_inches=0.05, bbox_inches='tight')
+print(f"Figure saved as {timechange_filename}")
+plt.show()
 # %%
