@@ -1,5 +1,4 @@
 #%%
-#%%
 # Discrete-time simulation for x[t+1] = A x[t] + B u[t]
 # A includes a 10 Hz damped mode (ζ = 0.6). We sweep input frequency ω (rad/sample)
 # and plot tr(Q^{-1}) where Q is the sample covariance of x in steady state.
@@ -22,7 +21,7 @@ plt.rcParams['mathtext.default'] = 'regular'
 fs = 100.0        # sampling rate [Hz]  (edit as needed)
 Ts = 1.0 / fs
 
-Time = 50
+Time = 10
 T_total = int(fs*Time)          # total steps
 T_burn  = T_total*4//5            # discard initial transient
 
@@ -66,7 +65,7 @@ def random_similarity(A, seed=None):
 assert T_burn < T_total
 t_idx = np.arange(T_total)
 
-r_list = [0.6, 0.99]
+r_list = [0.9, 0.94]
 hz_list = [10, 20]
 
 blocks = [block_discrete(r, f_hz) for r, f_hz in zip(r_list, hz_list)]
@@ -99,7 +98,6 @@ n = A.shape[0]
 
 plt.figure(figsize=(5, 5))
 im = plt.imshow(A, cmap='viridis')
-plt.title('A matrix', fontsize=24)
 for i in range(A.shape[0]):
     for j in range(A.shape[1]):
         plt.text(j, i, f"{A[i, j]:.3f}", ha='center', va='center',
@@ -129,36 +127,46 @@ def simulate_cov_for_omega2(A, B, w1, w2, T_total, T_burn, seed=0):
 
     x = np.zeros((n, T_total))
     noise = rng.normal(scale=sigma, size=(n, T_total-1))
+    # 入力信号 u を事前に生成
+    if w1 == 0 and w2 == 0:
+        u = np.zeros(T_total-1)
+    elif w1 == 0:
+        u = np.cos(w2 * np.arange(T_total-1))
+        u = u / np.sqrt(np.mean(u**2))
+    elif w2 == 0:
+        u = np.cos(w1 * np.arange(T_total-1))
+        u = u / np.sqrt(np.mean(u**2))
+    else:
+        u = np.cos(w1 * np.arange(T_total-1)) + np.cos(w2 * np.arange(T_total-1)) 
+        u = u / np.sqrt(np.mean(u**2))
+
+    u = u * 0.1  # 入力の大きさを調整
+
     for t in range(T_total-1):
-        if w1==0:
-            u = np.cos(w2 * t)
-        elif w2==0:
-            u = np.cos(w1 * t)
-        else:
-            u = np.cos(w1 * t) + np.cos(w2 * t)
-        x[:, t+1] = A @ x[:, t] + B[:,0]*u + noise[:, t]
+        x[:, t+1] = A @ x[:, t] + B[:, 0] * u[t] + noise[:, t]
     X_prev = x[:, T_burn-1:T_total-1]
     Qx = np.cov(X_prev)
+    
     return Qx
 
 for i, w1 in enumerate(ws):
     for j, w2 in enumerate(ws):
         Qx = simulate_cov_for_omega2(A_both, B_both, w1, w2, T_total, T_burn)
+        print(w1, w2)
         eigvals = np.linalg.eigvalsh(Qx)
         inv_lambda_both_2d[i, j] = np.sum(1.0 / eigvals)
 
-#%%
+# %%
 plt.figure(figsize=(8, 6))
-im = plt.imshow(np.log10(inv_lambda_both_2d), extent=[freqs[0], freqs[-1], freqs[0], freqs[-1]],
+im = plt.imshow(np.log(inv_lambda_both_2d), extent=[freqs[0], freqs[-1], freqs[0], freqs[-1]],
                 origin='lower', aspect='auto', cmap='viridis', norm=None)
-plt.xlabel('Input frequency 1 [Hz]', fontsize=20)
-plt.ylabel('Input frequency 2 [Hz]', fontsize=20)
-plt.title(f'r={r_list}, freq={hz_list} Hz \n combination stimuli', fontsize=22)
-plt.xticks(fontsize=18)
-plt.yticks(fontsize=18)
+plt.xlabel('Input frequency 1 [Hz]', fontsize=28)
+plt.ylabel('Input frequency 2 [Hz]', fontsize=28)
+plt.xticks(fontsize=24)
+plt.yticks(fontsize=24)
 cbar = plt.colorbar(im)
-cbar.set_label('log10(sum(1/λ))', fontsize=18)
-cbar.ax.tick_params(labelsize=16)
+cbar.set_label('log(sum(1/λ))', fontsize=24)
+cbar.ax.tick_params(labelsize=22)
 plt.tight_layout()
 program_name = os.path.splitext(os.path.basename(__file__))[0]
 results_dir = "results"
@@ -169,150 +177,222 @@ plt.savefig(filepath, format="svg")
 plt.show()
 
 # 最小のインデックスを表示
-min_idx = np.unravel_index(np.argmin(sum_inv_lambda_2d), sum_inv_lambda_2d.shape)
+min_idx = np.unravel_index(np.argmin(inv_lambda_both_2d), inv_lambda_both_2d.shape)
 print(f"最小値のインデックス: {min_idx}, 周波数: ({freqs[min_idx[0]]:.2f} Hz, {freqs[min_idx[1]]:.2f} Hz)")
 
 #%%
-def plot_rotated_ellipsoid_with_half_axes(a, b, c, center=(0.0, 0.0, 0.0), phi=0, theta=0, psi=0, xlim=(-10,10), ylim=(-10,10), zlim=(-10,10)):
-    """
-    3次元楕円体（回転あり）と各軸方向の半分だけ矢印を描画
-    a, b, c : 楕円体の半径（主軸長）
-    phi, theta, psi : ZYXオイラー角 [rad]（回転）
-    center : 楕円体中心 (x0, y0, z0)
-    """
+def plot_rotated_ellipsoid_with_half_axes(
+    a, b, c,
+    vecs,                             # 3x3（各列が主軸方向の単位ベクトル）
+    center=(0.0, 0.0, 0.0),
+    phi=0.0, theta=0.0, psi=0.0,      # 追加回転（ZYX）
+    xlim=None, ylim=None, zlim=None,  # Noneなら自動調整
+    n_u=60, n_v=30, ax=None
+):
+    vecs = np.asarray(vecs, dtype=float)
+    assert vecs.shape == (3,3), "vecs は形状 (3,3) で、各列が主軸方向ベクトルである必要があります。"
 
-    # 回転行列
-    rot = R.from_euler('zyx', [phi, theta, psi]).as_matrix()
+    # まず主軸方向に合わせる回転（列が各主軸）
+    rot = vecs
 
-    # 楕円体の点群生成
-    u = np.linspace(0, 2 * np.pi, 50)
-    v = np.linspace(0, np.pi, 25)
-    x = a * np.outer(np.cos(u), np.sin(v))
-    y = b * np.outer(np.sin(u), np.sin(v))
-    z = c * np.outer(np.ones_like(u), np.cos(v))
+    # オイラー角が非ゼロなら、ワールド座標でさらに回す
+    if not (phi == 0 and theta == 0 and psi == 0):
+        rot_euler = R.from_euler('zyx', [phi, theta, psi]).as_matrix()
+        rot = rot_euler @ rot
 
-    # 回転・平行移動
-    xyz = np.stack([x, y, z], axis=-1)
-    xyz_rot = np.einsum('ij,klj->kli', rot, xyz)
+    # 少し調整
+    axis = np.array([0, 0, 1], dtype=float)      # 例: z軸
+    axis /= np.linalg.norm(axis)
+    alpha = 90.0
+
+    R_extra = R.from_rotvec(np.deg2rad(alpha) * axis).as_matrix()
+
+    # ワールド回転（全体を地球基準でクルッと）
+    rot = R_extra @ rot
+
+    # パラメトリック楕円体（軸長 a,b,c を回転前座標で）
+    u = np.linspace(0, 2*np.pi, n_u)
+    v = np.linspace(0, np.pi,   n_v)
+    X = a * np.outer(np.cos(u), np.sin(v))
+    Y = b * np.outer(np.sin(u), np.sin(v))
+    Z = c * np.outer(np.ones_like(u), np.cos(v))
+
+    # 回転＋平行移動
+    xyz = np.stack([X, Y, Z], axis=-1)                  # [nu, nv, 3]
+    xyz_rot = np.einsum('ij,klj->kli', rot, xyz)        # rot を最後の次元に適用
     x_rot = xyz_rot[..., 0] + center[0]
     y_rot = xyz_rot[..., 1] + center[1]
     z_rot = xyz_rot[..., 2] + center[2]
 
-    fig = plt.figure(figsize=(7, 7))
-    ax = fig.add_subplot(111, projection='3d')
-    # ワイヤーフレームで楕円体を描画
+    # 半軸ベクトル（中心→外周方向へ“半分の長さ”）
+    half_axes = rot @ np.diag([a*0.97, b*0.97, c*0.97])    # 3x3（各列が矢印ベクトル）
+
+    # 楕円体
     ax.plot_wireframe(x_rot, y_rot, z_rot, color='gray', linewidth=1, alpha=0.7)
 
-    # 主軸方向ベクトル
-    axes = np.array([[a,0,0],[0,b,0],[0,0,c]])
-    axes_rot = rot @ axes.T
-
-    # 各軸に半分だけ矢印（headなし）
+    # 各半軸の矢印（線分。必要なら quiver に置換可）
+    colors = ['r', 'g', 'b']  # x, y, z軸ごとに色を指定
     for i in range(3):
-        ax.plot([center[0], center[0] + axes_rot[0, i]],
-                [center[1], center[1] + axes_rot[1, i]],
-                [center[2], center[2] + axes_rot[2, i]],
-                color='k', linewidth=2)
+        ax.plot(
+            [center[0], center[0] + half_axes[0, i]],
+            [center[1], center[1] + half_axes[1, i]],
+            [center[2], center[2] + half_axes[2, i]],
+            linewidth=5, color=colors[i]
+        )
 
-    ax.set_xlim(xlim)
-    ax.set_ylim(ylim)
-    ax.set_zlim(zlim)
+    # 自動調整: xlim, ylim, zlimがNoneならデータ範囲＋余白で設定
+    pad = 0.1  # 余白割合
+    if xlim is None:
+        xmin, xmax = np.min(x_rot), np.max(x_rot)
+        dx = xmax - xmin
+        xlim = (xmin - pad*dx, xmax + pad*dx)
+    if ylim is None:
+        ymin, ymax = np.min(y_rot), np.max(y_rot)
+        dy = ymax - ymin
+        ylim = (ymin - pad*dy, ymax + pad*dy)
+    if zlim is None:
+        zmin, zmax = np.min(z_rot), np.max(z_rot)
+        dz = zmax - zmin
+        zlim = (zmin - pad*dz, zmax + pad*dz)
+
+    ax.set_xlim(xlim); ax.set_ylim(ylim); ax.set_zlim(zlim)
+    ax.set_box_aspect([xlim[1]-xlim[0], ylim[1]-ylim[0], zlim[1]-zlim[0]])
     ax.tick_params(labelbottom=False, labelleft=False, labelright=False, labeltop=False)
     ax.grid(True, linestyle='--', alpha=0.5)
-    plt.tight_layout()
-    plt.show()
 
-# 10Hz:20Hzの比率ごとに楕円体をプロット
-scales = [1e-1, 10]  # [通常, 逆数]
-lims = [20, 10]   # [通常, 逆数]
 
-# 比率リスト
-w1s = [10, 20, 10] 
-w2s = [10, 20, 20]
+def align_eigenvalues(vals, target_vecs, origin_vecs):
+    """valsをtarget_vecsに合わせて並び替える"""
+    aligned_vals = np.zeros_like(vals)
+    used_indices = set()
+    for i in range(target_vecs.shape[1]):
+        target_vec = target_vecs[:, i]
+        # origin_vecsの中でtarget_vecに最も近いものを探す
+        similarities = [np.abs(np.dot(target_vec, origin_vecs[:, j])) if j not in used_indices else -1 for j in range(origin_vecs.shape[1])]
+        best_j = np.argmax(similarities)
+        aligned_vals[i] = vals[best_j]
+        used_indices.add(best_j)
+    return aligned_vals
 
-for w1, w2 in zip(w1s,w2s):
-    Qx = simulate_cov_for_omega2(A_both, B_both, w1, w2, T_total, T_burn)
-    eigvals, eigvecs = np.linalg.eigh(Qx)
-    # ソート（大きい順）
-    order = np.argsort(eigvals)[::-1]
-    eigvals = eigvals[order]
-    eigvecs = eigvecs[:, order]
-    print(f"Ratio {r:.2f} eigvals:", eigvals)
 
-    a, b, c = eigvals[0], eigvals[1], eigvals[2]
+# 0Hz入力のみ
+Qx_0Hz = simulate_cov_for_omega2(A_both, B_both, 0, 0, T_total, T_burn)
+eigvals_0Hz, eigvecs_0Hz = np.linalg.eigh(Qx_0Hz)
 
-    # 通常の楕円体
+# 10Hz入力のみ
+Qx_10Hz = simulate_cov_for_omega2(A_both, B_both, 2*np.pi*10/fs, 0, T_total, T_burn)
+eigvals_10Hz, eigvecs_10Hz = np.linalg.eigh(Qx_10Hz)
+
+# 20Hz入力のみ
+Qx_20Hz = simulate_cov_for_omega2(A_both, B_both, 0, 2*np.pi*20/fs, T_total, T_burn)
+eigvals_20Hz, eigvecs_20Hz = np.linalg.eigh(Qx_20Hz)
+
+# 10Hz+20Hz入力
+Qx_10_20Hz = simulate_cov_for_omega2(A_both, B_both, 2*np.pi*10/fs, 2*np.pi*20/fs, T_total, T_burn)
+eigvals_10_20Hz, eigvecs_10_20Hz = np.linalg.eigh(Qx_10_20Hz)
+
+Qx_10Hz_aligned = align_eigenvalues(eigvals_10Hz, eigvecs_0Hz, eigvecs_10Hz)
+Qx_20Hz_aligned = align_eigenvalues(eigvals_20Hz, eigvecs_0Hz, eigvecs_20Hz)
+Qx_10_20Hz_aligned = align_eigenvalues(eigvals_10_20Hz, eigvecs_0Hz, eigvecs_10_20Hz)
+
+# 楕円体の主軸長を計算
+def get_ellipsoid_axes(eigvals):
+    eigvals_sorted = np.sort(eigvals)[::-1]
+    axes = eigvals_sorted[:3]
+    return axes
+
+eigvals_list = [eigvals_0Hz, eigvals_10Hz, eigvals_20Hz, eigvals_10_20Hz]
+titles = ["Passive", "10Hz", "20Hz", "10Hz + 20Hz"]
+
+fig = plt.figure(figsize=(18, 9))
+scale_eig_list = [2.5, 2.5, 2.5, 2.5]  # 例: 各入力ごとに異なるスケールを設定
+lim=10
+
+for i, eigvals in enumerate(eigvals_list):
+    scale_eig = scale_eig_list[i]
+    a, b, c = get_ellipsoid_axes(eigvals)
+    vecs = eigvecs_10Hz[:, np.argsort(eigvals_10Hz)[::-1]][:3,:3]  # 10Hzの固有ベクトルに合わせる
+
+    print(titles[i], "eigenvalues", a,b,c)
+
+    # 上段: 通常の楕円体
+    ax1 = fig.add_subplot(2, 4, i+1, projection='3d')
     plot_rotated_ellipsoid_with_half_axes(
-        a=a*scales[0], b=b*scales[0], c=c*scales[0],
+        a=a*scale_eig, b=b*scale_eig, c=c*scale_eig,
+        vecs=vecs,
         center=(0,0,0), phi=np.deg2rad(30), theta=np.deg2rad(20), psi=np.deg2rad(10),
-        xlim=(-lims[0], lims[0]), ylim=(-lims[0], lims[0]), zlim=(-lims[0], lims[0])
+        xlim=(-lim, lim), ylim=(-lim, lim), zlim=(-lim, lim),
+        n_u=60, n_v=30,
+        ax=ax1
     )
+    ax1.set_title(titles[i], fontsize=24)
 
-    # 逆数の楕円体
+    # 下段: 通常の楕円体（scaleは自動調整）
+    ax2 = fig.add_subplot(2, 4, i+5, projection='3d')
+    # scaleを自動調整: 最大主軸長がlimの半分になるように
+    max_axis = max(a, b, c)
+    auto_scale = lim / 2 / max_axis if max_axis != 0 else 1.0
     plot_rotated_ellipsoid_with_half_axes(
-        a=1/a*scales[1], b=1/b*scales[1], c=1/c*scales[1],
+        a=a*auto_scale, b=b*auto_scale, c=c*auto_scale,
+        vecs=vecs,
         center=(0,0,0), phi=np.deg2rad(30), theta=np.deg2rad(20), psi=np.deg2rad(10),
-        xlim=(-lims[1], lims[1]), ylim=(-lims[1], lims[1]), zlim=(-lims[1], lims[1])
+        n_u=60, n_v=30,
+        ax=ax2
     )
+    ax2.set_title(f"{titles[i]}", fontsize=24)
 
-    print(f"Sum of eigvals (ratio={r:.2f}):", np.sum(eigvals))
-    print(f"Sum of inverse eigvals (ratio={r:.2f}):", np.sum(1/eigvals))
+plt.tight_layout(rect=[0, 0, 1, 0.97])  # suptitleの余白を少しだけ確保
+plt.subplots_adjust(hspace=0.1)        # 上下段の間隔を控えめに調整
+program_name = os.path.splitext(os.path.basename(__file__))[0]
+results_dir = "results"
+os.makedirs(results_dir, exist_ok=True)
+filename = f"{program_name}_cov_ellipsoids.svg"
+filepath = os.path.join(results_dir, filename)
+plt.savefig(filepath, format="svg")
+plt.show()
 
-# %%
-def simulate_cov_with_bandstop_noise(A, B, notch_freqs, fs, T_total, T_burn, seed=0):
-    """
-    入力u[t]として、notch_freqs以外のホワイトノイズを加える
-    notch_freqs: 除去したい周波数 [Hz] のリストまたは配列
-    """
-    rng = np.random.default_rng(seed)
-    n = A.shape[0]
-    sigma = 1e-2
+fig = plt.figure(figsize=(18, 9))
+scale_inv_list = [1e-2, 1e-2, 1e-2, 1e-2]
+lim = 10
+for i, eigvals in enumerate(eigvals_list):
+    scale_eig = scale_eig_list[i]
+    a, b, c = get_ellipsoid_axes(eigvals)
+    vecs = eigvecs_10Hz[:, np.argsort(eigvals_10Hz)[::-1]][:3,:3]  # 10Hzの固有ベクトルに合わせる
 
-    # ホワイトノイズ生成
-    noise_input = rng.normal(scale=1.0, size=T_total-1)
-    nyq = fs / 2
+    print(titles[i], "eigenvalues", a,b,c)
 
-    # notchフィルタを順に適用
-    filtered_input = noise_input.copy()
-    if np.isscalar(notch_freqs):
-        notch_freqs = [notch_freqs]
-    for notch_freq in notch_freqs:
-        b, a = scipy.signal.iirnotch(notch_freq/nyq, Q=30)
-        filtered_input = scipy.signal.filtfilt(b, a, filtered_input)
+    # 上段: 逆数の楕円体
+    scale_inv = scale_inv_list[i]
+    ax1 = fig.add_subplot(2, 4, i+1, projection='3d')
+    plot_rotated_ellipsoid_with_half_axes(
+        a=1/a*scale_inv, b=1/b*scale_inv, c=1/c*scale_inv,
+        vecs=vecs,
+        center=(0,0,0), phi=np.deg2rad(30), theta=np.deg2rad(20), psi=np.deg2rad(10),
+        xlim=(-lim, lim), ylim=(-lim, lim), zlim=(-lim, lim),
+        n_u=60, n_v=30,
+        ax=ax1
+    )
+    ax1.set_title(f"{titles[i]}", fontsize=24)
 
-    x = np.zeros((n, T_total))
-    noise = rng.normal(scale=sigma, size=(n, T_total-1))
-    for t in range(T_total-1):
-        u = filtered_input[t]
-        x[:, t+1] = A @ x[:, t] + B[:,0]*u + noise[:, t]
-    X_prev = x[:, T_burn-1:T_total-1]
-    Qx = np.cov(X_prev)
-    return Qx
+    # 下段: 逆数の楕円体
+    ax2 = fig.add_subplot(2, 4, i+5, projection='3d')
+    plot_rotated_ellipsoid_with_half_axes(
+        a=1/a*scale_inv, b=1/b*scale_inv, c=1/c*scale_inv,
+        vecs=vecs,
+        center=(0,0,0), phi=np.deg2rad(30), theta=np.deg2rad(20), psi=np.deg2rad(10),
+        n_u=60, n_v=30,
+        ax=ax2
+    )
+    ax2.set_title(f"{titles[i]}", fontsize=24)
 
-Qx = simulate_cov_with_bandstop_noise(A_both, B_both, [20], fs, T_total, T_burn, seed=0)
-eigvals, eigvecs = np.linalg.eigh(Qx)
-# ソート（大きい順）
-order = np.argsort(eigvals)[::-1]
-eigvals = eigvals[order]
-eigvecs = eigvecs[:, order]
-print(f"Ratio {r:.2f} eigvals:", eigvals)
+plt.tight_layout(rect=[0, 0, 1, 0.97])  # suptitleの余白を少しだけ確保
+plt.subplots_adjust(hspace=0.1)        # 上下段の間隔を控えめに調整
+program_name = os.path.splitext(os.path.basename(__file__))[0]
+results_dir = "results"
+os.makedirs(results_dir, exist_ok=True)
+filename = f"{program_name}_cov_inv_ellipsoids.svg"
+filepath = os.path.join(results_dir, filename)
+plt.savefig(filepath, format="svg")
+plt.show()
 
-a, b, c = eigvals[0], eigvals[1], eigvals[2]
-
-# 通常の楕円体
-plot_rotated_ellipsoid_with_half_axes(
-    a=a*scales[0], b=b*scales[0], c=c*scales[0],
-    center=(0,0,0), phi=np.deg2rad(30), theta=np.deg2rad(20), psi=np.deg2rad(10),
-    xlim=(-lims[0], lims[0]), ylim=(-lims[0], lims[0]), zlim=(-lims[0], lims[0])
-)
-
-# 逆数の楕円体
-plot_rotated_ellipsoid_with_half_axes(
-    a=1/a*scales[1], b=1/b*scales[1], c=1/c*scales[1],
-    center=(0,0,0), phi=np.deg2rad(30), theta=np.deg2rad(20), psi=np.deg2rad(10),
-    xlim=(-lims[1], lims[1]), ylim=(-lims[1], lims[1]), zlim=(-lims[1], lims[1])
-)
-
-print(f"Sum of eigvals (ratio={r:.2f}):", np.sum(eigvals))
-print(f"Sum of inverse eigvals (ratio={r:.2f}):", np.sum(1/eigvals))
 # %%
