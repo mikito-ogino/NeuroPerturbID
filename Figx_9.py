@@ -3,6 +3,10 @@
 # A includes a 10 Hz damped mode (ζ = 0.6). We sweep input frequency ω (rad/sample)
 # and plot tr(Q^{-1}) where Q is the sample covariance of x in steady state.
 
+######################
+#Practical Simulation
+#####################
+
 import numpy as np
 import matplotlib.pyplot as plt
 import scipy
@@ -62,7 +66,7 @@ def random_similarity(A, seed=None):
     return P @ A @ np.linalg.inv(P)
 
 # 複数入力: u[t] = sum_i cos(ws[i]*t)
-def simulate_cov_for_omega_ws(A, B, ws, T_total, T_burn, seed=0, white_input=False, uniform_input=False):
+def simulate_cov_for_omega_ws(A, B, ws, T_total, T_burn, seed=0, white_input=False, uniform_input=False, plot_signals=False):
     rng = np.random.default_rng(seed)
     n = A.shape[0]
     sigma = 1e-2
@@ -75,7 +79,7 @@ def simulate_cov_for_omega_ws(A, B, ws, T_total, T_burn, seed=0, white_input=Fal
         u = u / np.sqrt(np.mean(u**2))
     elif uniform_input:
         u = np.zeros(T_total-1)
-        for w in np.arange(0, 100, 0.5):
+        for w in range(0, 100, 1):
             if w != 0:
                 u += np.cos(w * np.arange(T_total-1))
         u = u / np.sqrt(np.mean(u**2))        
@@ -104,6 +108,55 @@ def simulate_cov_for_omega_ws(A, B, ws, T_total, T_burn, seed=0, white_input=Fal
     AB_hat = X2 @ np.linalg.pinv(XU)   # shape: (n, n+1)
     A_hat = AB_hat[:, :n]              # shape: (n, n)
     B_hat = AB_hat[:, n:]              # shape: (n, 1)
+
+    if plot_signals:
+        # plot rows of X1 as vertically stacked, label-free, blue subplots with minimal spacing
+
+        n_plots = X1.shape[0]
+        fig, axes = plt.subplots(n_plots, 1, figsize=(3, n_plots*0.05), sharex=True)
+        if n_plots == 1:
+            axes = [axes]
+        for i, ax in enumerate(axes):
+            ax.plot(X1[i, :], color='blue', linewidth=0.7)
+            ax.set_xticks([]); ax.set_yticks([])
+            ax.set_ylim(-5, 5)  # 全サブプロットの表示範囲を固定
+            for spine in ax.spines.values():
+                spine.set_visible(False)
+        plt.subplots_adjust(hspace=0.01)
+        plt.tight_layout(pad=0)
+
+        # ensure results_dir exists (use global if present)
+        if 'results_dir' not in globals():
+            results_dir = "results"
+            os.makedirs(results_dir, exist_ok=True)
+        else:
+            results_dir = globals().get('results_dir')
+
+        # safe program_name fallback
+        prog = globals().get('program_name', 'figure')
+
+        filename = f"{prog}_signals_seed{seed}.svg"
+        filepath = os.path.join(results_dir, filename)
+        plt.savefig(filepath, format='svg', bbox_inches='tight')
+        plt.close(fig)
+
+        # plot input U1 similarly to X1
+        n_u = U1.shape[0]
+        fig_u, axes_u = plt.subplots(n_u, 1, figsize=(3, n_u * 0.5), sharex=True)
+        if n_u == 1:
+            axes_u = [axes_u]
+        for i, ax in enumerate(axes_u):
+            ax.plot(U1[i, :], color='black', linewidth=0.7)
+            ax.set_xticks([]); ax.set_yticks([])
+            for spine in ax.spines.values():
+                spine.set_visible(False)
+        plt.subplots_adjust(hspace=0.01)
+        plt.tight_layout(pad=0)
+
+        filename = f"{prog}_U1_seed{seed}.svg"
+        filepath = os.path.join(results_dir, filename)
+        plt.savefig(filepath, format='svg', bbox_inches='tight')
+        plt.close(fig_u)
 
     return Qx, A_hat, B_hat
 
@@ -247,7 +300,11 @@ inv_sum = np.sum(1.0 / np.linalg.eigvalsh(Qx_passive))
 inv_sum_list.append(inv_sum)
 inv_sum_dictionary[f"Passive"] = inv_sum
 A_error_dictionary[f"Passive"] = A_error_passive_list
-A_hat_dictionary["Passive"] = A_hat_passive
+A_hat_dictionary["Passive"] = A_hat_passive_list
+
+Qx_passive, A_hat_passive, B_hat_passive = simulate_cov_for_omega_ws(
+    A_both, B_both, [0, 0], T_total, T_burn, seed=0, white_input=False, plot_signals=True
+)
 
 ######################################
 # ホワイトノイズ入力（u=0, ws=[0,0]）
@@ -284,7 +341,7 @@ inv_sum = np.sum(1.0 / np.linalg.eigvalsh(Qx_noise))
 inv_sum_list.append(inv_sum)
 inv_sum_dictionary[f"Flat"] = inv_sum
 A_error_dictionary[f"Flat"] = A_error_noise_list
-A_hat_dictionary["Flat"] = A_hat_noise
+A_hat_dictionary["Flat"] = A_hat_noise_list
 
 
 for condition_label, A_hat_current in zip(["passive", "noise"], [A_hat_passive, A_hat_noise]):
@@ -320,7 +377,11 @@ for condition_label, A_hat_current in zip(["passive", "noise"], [A_hat_passive, 
         A_hat_current = A_hat_next  # 次のイテレーション用
         inv_sum_dictionary[f"{condition_label}-design{it+1}"] = inv_sum
         A_error_dictionary[f"{condition_label}-design{it+1}"] = A_error_list_trial
-        A_hat_dictionary[f"{condition_label}-design{it+1}"] = A_hat_next
+        A_hat_dictionary[f"{condition_label}-design{it+1}"] = A_hat_list_trial
+        Qx_trial, A_hat_trial, B_hat_trial = simulate_cov_for_omega_ws(
+            A_both, B_both, ws_current, T_total, T_burn, seed=it+1, white_input=False, plot_signals=True
+        )
+
 
 # 真のAの固有値から周波数を計算し、simulate_cov_for_omega_wsを複数trialで実行して平均を取る
 
@@ -469,43 +530,127 @@ rows = 2
 # collect diffs to set common vmin/vmax
 diffs = []
 for key in keys_passive + keys_noise:
-    Ahat = A_hat_dictionary.get(key)
-    if Ahat is None:
+    Ahat_entry = A_hat_dictionary.get(key)
+    if Ahat_entry is None:
         continue
-    Ahat = np.asarray(Ahat)
-    if Ahat.shape != A_both.shape:
+
+    # A_hat は trial ごとの list かもしれない -> 平均を取る
+    try:
+        Ahat_arr = np.asarray(Ahat_entry)
+        # handle object-dtype lists of arrays
+        if Ahat_arr.dtype == object:
+            Ahat_arr = np.stack(list(Ahat_entry))
+    except Exception:
+        try:
+            Ahat_arr = np.stack(list(Ahat_entry))
+        except Exception:
+            continue
+
+    # 平均を取る（trial軸がある場合）
+    if Ahat_arr.ndim == 3:
+        Ahat_mean = np.nanmean(Ahat_arr, axis=0)
+    elif Ahat_arr.ndim == 2:
+        Ahat_mean = Ahat_arr
+    else:
+        # unexpected shape
         continue
-    diffs.append(np.abs(Ahat - A_both))
+
+    if Ahat_mean.shape != A_both.shape:
+        continue
+
+    diffs.append(np.abs(Ahat_mean - A_both))
+
 if len(diffs) == 0:
     raise RuntimeError("No valid A_hat matrices to compare with A_both.")
 
-vmin = 0.00001
-vmax = max(np.nanmax(m) for m in diffs)-0.002
+#%%
+vmin = min(np.nanmin(m) for m in diffs)
+vmax = max(np.nanmax(m) for m in diffs) - 0.004
+if np.isnan(vmax) or vmax <= vmin:
+    vmax = vmin * 10 + 1e-6
 
-cmap_white_red = LinearSegmentedColormap.from_list("white_red", ["white", "red"])
+# Softer, cleaner white->muted-orange palette (less "dirty" / oversaturated)
+cmap_white_red = LinearSegmentedColormap.from_list(
+    "nature_error",
+    ["#ffffff", "#fbf9f6", "#f7cfa6", "#f08b66", "#b23b2a"],
+    N=256
+)
 fig, axs = plt.subplots(rows, cols, figsize=(2*cols, 4), dpi=150)
 
+# helper to get mean Ahat for plotting
+def get_mean_Ahat(key):
+    entry = A_hat_dictionary.get(key)
+    if entry is None:
+        return None
+    try:
+        arr = np.asarray(entry)
+        if arr.dtype == object:
+            arr = np.stack(list(entry))
+    except Exception:
+        try:
+            arr = np.stack(list(entry))
+        except Exception:
+            return None
+    if arr.ndim == 3:
+        return np.nanmean(arr, axis=0)
+    elif arr.ndim == 2:
+        return arr
+    else:
+        return None
+
+# --- Save individual plots for each key: absolute diff and mean A_hat (viridis) ---
+all_keys = keys_passive + keys_noise
+for key in all_keys:
+    Ahat_mean = get_mean_Ahat(key)
+    if Ahat_mean is None or Ahat_mean.shape != A_both.shape:
+        # create a placeholder image saying missing
+        fig_miss, ax_miss = plt.subplots(figsize=(3, 3), dpi=150)
+        ax_miss.text(0.5, 0.5, f"missing: {key}", ha='center', va='center', fontsize=12)
+        ax_miss.set_xticks([]); ax_miss.set_yticks([])
+        fname = f"{program_name}_missing_{key}.svg"
+        plt.savefig(os.path.join(results_dir, fname), format='svg', bbox_inches='tight')
+        plt.close(fig_miss)
+        continue
+
+    # Absolute difference plot (using custom white->orange cmap)
+    diff = np.abs(Ahat_mean - A_both)
+    fig_d, ax_d = plt.subplots(figsize=(4, 4), dpi=150)
+    im_d = ax_d.imshow(diff, cmap=cmap_white_red, vmin=vmin, vmax=vmax, interpolation='nearest', aspect='equal')
+    ax_d.set_xticks([]); ax_d.set_yticks([])
+    fname = f"{program_name}_absdiff_{key}.svg"
+    plt.savefig(os.path.join(results_dir, fname), format='svg', bbox_inches='tight')
+    plt.close(fig_d)
+
+    # Mean A_hat plot (viridis)
+    fig_m, ax_m = plt.subplots(figsize=(4, 4), dpi=150)
+    im_m = ax_m.imshow(Ahat_mean, cmap='viridis', interpolation='nearest', aspect='equal')
+    ax_m.set_xticks([]); ax_m.set_yticks([])
+    fname = f"{program_name}_Ahat_mean_{key}.svg"
+    plt.savefig(os.path.join(results_dir, fname), format='svg', bbox_inches='tight')
+    plt.close(fig_m)
+
+# --- Combined grid of passive/noise as before ---
 for j, key in enumerate(keys_passive):
     ax = axs[0, j] if rows > 1 else axs[j]
-    Ahat = A_hat_dictionary.get(key)
-    if Ahat is None or np.asarray(Ahat).shape != A_both.shape:
+    Ahat_mean = get_mean_Ahat(key)
+    if Ahat_mean is None or Ahat_mean.shape != A_both.shape:
         ax.text(0.5, 0.5, "missing", ha='center', va='center', fontsize=12)
         ax.set_xticks([]); ax.set_yticks([])
         continue
-    diff = np.abs(np.asarray(Ahat) - A_both)
-    im = ax.imshow(diff, cmap=cmap_white_red, vmin=vmin, vmax=vmax)
+    diff = np.abs(Ahat_mean - A_both)
+    im = ax.imshow(diff, cmap=cmap_white_red, vmin=vmin, vmax=vmax, interpolation='nearest', aspect='equal')
     ax.set_title(str(key), fontsize=10)
     ax.set_xticks([]); ax.set_yticks([])
 
 for j, key in enumerate(keys_noise):
     ax = axs[1, j]
-    Ahat = A_hat_dictionary.get(key)
-    if Ahat is None or np.asarray(Ahat).shape != A_both.shape:
+    Ahat_mean = get_mean_Ahat(key)
+    if Ahat_mean is None or Ahat_mean.shape != A_both.shape:
         ax.text(0.5, 0.5, "missing", ha='center', va='center', fontsize=12)
         ax.set_xticks([]); ax.set_yticks([])
         continue
-    diff = np.abs(np.asarray(Ahat) - A_both)
-    im = ax.imshow(diff, cmap=cmap_white_red, vmin=vmin, vmax=vmax)
+    diff = np.abs(Ahat_mean - A_both)
+    im = ax.imshow(diff, cmap=cmap_white_red, vmin=vmin, vmax=vmax, interpolation='nearest', aspect='equal')
     ax.set_title(str(key), fontsize=10)
     ax.set_xticks([]); ax.set_yticks([])
 

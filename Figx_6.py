@@ -396,3 +396,66 @@ plt.savefig(filepath, format="svg")
 plt.show()
 
 # %%
+# 2つの入力: u[t] = cos(w1*t) + cos(w2*t)
+def simulate_cov_for_omega_flat(A, B, ws, T_total, T_burn, seed=0):
+    rng = np.random.default_rng(seed)
+    n = A.shape[0]
+    sigma = 1e-2
+
+    x = np.zeros((n, T_total))
+    noise = rng.normal(scale=sigma, size=(n, T_total-1))
+
+    u=0
+    for w in ws:
+        u += np.cos(w * np.arange(T_total-1))
+    u = u / np.sqrt(np.mean(u**2))
+
+    u = u * 0.1  # 入力の大きさを調整
+
+    for t in range(T_total-1):
+        x[:, t+1] = A @ x[:, t] + B[:, 0] * u[t] + noise[:, t]
+    X_prev = x[:, T_burn-1:T_total-1]
+    Qx = np.cov(X_prev)
+    
+    return Qx
+
+ws_flat = range(1, 31)
+Qx_flat = simulate_cov_for_omega_flat(A_both, B_both, [2*np.pi*w/fs for w in ws_flat], T_total, T_burn)
+eigvals_flat, eigvecs_flat = np.linalg.eigh(Qx_flat)
+print("Flat input eigenvalues:", eigvals_flat)
+
+# 比較用の棒グラフ: eigvals_flat と eigvals_10_20Hz の逆数の和
+eps = 1e-12
+eig_flat = np.clip(eigvals_flat, eps, None)
+eig_10_20 = np.clip(eigvals_10_20Hz, eps, None)
+
+inv_sum_flat = np.sum(1.0 / eig_flat)
+inv_sum_10_20 = np.sum(1.0 / eig_10_20)
+
+labels = ["Flat (1-30Hz)", "10Hz + 20Hz"]
+values = [inv_sum_flat, inv_sum_10_20]
+
+# カラーマップ viridis から色を取得
+cmap = plt.get_cmap('viridis')
+colors = [cmap(0.25), cmap(0.75)]
+
+fig, ax = plt.subplots(figsize=(3, 1.5), dpi=150)
+bars = ax.bar(labels, values, color=colors, edgecolor='black', linewidth=1.5)
+
+# プロット全体を枠で囲む（スパインを表示・太くする）
+for spine in ax.spines.values():
+    spine.set_visible(True)
+    spine.set_linewidth(1.5)
+
+# 上の余白を少し開ける（上限を値の110-120%に設定）
+ymax = max(values) if len(values) > 0 else 1.0
+ax.set_ylim(0, ymax * 1.2)
+
+# レイアウト調整（top領域を確保）
+plt.tight_layout(rect=[0, 0, 1, 0.95])
+
+# 保存
+filename = f"{program_name}_invsum_comparison.svg"
+os.makedirs(results_dir, exist_ok=True)
+plt.savefig(os.path.join(results_dir, filename), format="svg", bbox_inches='tight', pad_inches=0.02)
+plt.show()

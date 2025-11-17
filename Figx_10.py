@@ -1,4 +1,7 @@
 #%%
+###########################
+# Optimal Control Simulation
+###########################
 import sys
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "lib"))
@@ -20,7 +23,7 @@ import os
 import networkx as nx
 
 results_dir = "results"
-fs=100
+fs=50
 dt = 1/fs
 input_type = "impulse"
 inputTrials = 5
@@ -90,10 +93,11 @@ for i in range(A_discrete.shape[0]):
 
 plt.tight_layout()
 
-# Save the heatmap as an SVG file
-heatmap_filename = os.path.join(results_dir, f"{__file__.split('/')[-1].split('.')[0]}_A_discrete_heatmap_dim{dim}.svg")
-plt.savefig(heatmap_filename)
-print(f"Heatmap saved as {heatmap_filename}")
+# Save the heatmap as a PDF file
+os.makedirs(results_dir, exist_ok=True)
+pdf_filename = os.path.join(results_dir, f"{__file__.split('/')[-1].split('.')[0]}_A_discrete_heatmap_dim{dim}.pdf")
+plt.savefig(pdf_filename, bbox_inches='tight')
+print(f"Heatmap saved as {pdf_filename}")
 
 #%%
 # Create a directed graph from the discrete-time matrix A
@@ -114,9 +118,9 @@ pos = nx.spring_layout(G, seed=41, k=4)  # positions for all nodes, k controls t
 # Draw nodes and edges
 nx.draw(G, pos, with_labels=True, node_color='skyblue', edge_color='black', node_size=500, font_size=12, font_weight='bold', arrows=True, width=2, arrowsize=20)
 
-svg_filename = os.path.join(results_dir, f"{__file__.split('/')[-1].split('.')[0]}_network_dim{dim}.svg")
-plt.savefig(svg_filename)
-print(f"Figure saved as {svg_filename}")
+pdf_filename = os.path.join(results_dir, f"{__file__.split('/')[-1].split('.')[0]}_network_dim{dim}.pdf")
+plt.savefig(pdf_filename, bbox_inches='tight')
+print(f"Figure saved as {pdf_filename}")
 plt.show()
 
 #%%
@@ -157,18 +161,22 @@ def compute_metrics(value, Trials, dim, fs, T, dt, A_true, B_true, input_type, t
             
             u0 = np.zeros(dim)
             u0[np.random.randint(0, dim)] = 1
-            if input_type=="impulse": #Impulse
-                w = np.zeros(fs*T)
+            n_steps = int(fs * T)
+            if input_type == "impulse":  # Impulse
+                w = np.zeros(n_steps)
                 w[0] = value
                 u = np.outer(u0, w)
-            elif input_type=="step": #Step
-                w = np.ones(fs*T)*value
+            elif input_type == "step":  # Step
+                w = np.ones(n_steps) * value
                 u = np.outer(u0, w)
-            elif input_type=="cos": #Cosine
-                omega = 2*np.pi*value
-                u = np.zeros([dim, fs*T])
+            elif input_type == "cos":  # Cosine
+                omega = 2 * np.pi * value
                 w = np.cos(omega * np.arange(0, T, dt))
                 u = np.outer(u0, w)
+            elif input_type == "passive":  # Passive: zero (no external input)
+                u = np.zeros((dim, n_steps))
+            else:
+                raise ValueError(f"Unknown input_type: {input_type}")
                     
             # u += u_xi_trials[trial, :, :]
 
@@ -193,11 +201,10 @@ def compute_metrics(value, Trials, dim, fs, T, dt, A_true, B_true, input_type, t
         Z = np.hstack(Zs)
         U = np.hstack(Us)
                 
-        # 
-        Phi_est = Y@scipy.linalg.pinv(Z)
-        
-        A_est = Phi_est[:,:dim]
-        B_est = Phi_est[:,dim:]
+        # If B is known (here B_true is identity), estimate A from Y - B*U = A*X
+        B_est = B_true.copy()
+        A_est = (Y - B_est @ U) @ scipy.linalg.pinv(X)
+        Phi_est = np.hstack([A_est, B_est])
         
         # Plot heatmap of A_true
         set_default_plot_settings(font_size=18, dpi=200)
@@ -212,9 +219,9 @@ def compute_metrics(value, Trials, dim, fs, T, dt, A_true, B_true, input_type, t
         plt.ylabel('Dimension')
         plt.title('$A_{true}$', fontname='cmb10')
         plt.tight_layout()
-        svg_filename = os.path.join(results_dir, f"{__file__.split('/')[-1].split('.')[0]}_A_true_heatmap_{value}.svg")
-        plt.savefig(svg_filename)
-        print(f"Heatmap saved as {svg_filename}")
+        pdf_filename = os.path.join(results_dir, f"{__file__.split('/')[-1].split('.')[0]}_A_true_heatmap_{input_type}.pdf")
+        plt.savefig(pdf_filename)
+        print(f"Heatmap saved as {pdf_filename}")
         plt.show()
 
         # Plot heatmap of A_est
@@ -229,9 +236,9 @@ def compute_metrics(value, Trials, dim, fs, T, dt, A_true, B_true, input_type, t
         plt.ylabel('Dimension')
         plt.title('$A_{est}$', fontname='cmb10')
         plt.tight_layout()
-        svg_filename = os.path.join(results_dir, f"{__file__.split('/')[-1].split('.')[0]}_A_est_heatmap_{value}.svg")
-        plt.savefig(svg_filename)
-        print(f"Heatmap saved as {svg_filename}")
+        pdf_filename = os.path.join(results_dir, f"{__file__.split('/')[-1].split('.')[0]}_A_est_heatmap_{input_type}.pdf")
+        plt.savefig(pdf_filename)
+        print(f"Heatmap saved as {pdf_filename}")
         plt.show()
 
         # Plot heatmap of B_true
@@ -246,9 +253,9 @@ def compute_metrics(value, Trials, dim, fs, T, dt, A_true, B_true, input_type, t
         plt.ylabel('Dimension')
         plt.title('$B_{true}$', fontname='cmb10')
         plt.tight_layout()
-        svg_filename = os.path.join(results_dir, f"{__file__.split('/')[-1].split('.')[0]}_B_true_heatmap_{value}.svg")
-        plt.savefig(svg_filename)
-        print(f"Heatmap saved as {svg_filename}")
+        pdf_filename = os.path.join(results_dir, f"{__file__.split('/')[-1].split('.')[0]}_B_true_heatmap_{input_type}.pdf")
+        plt.savefig(pdf_filename)
+        print(f"Heatmap saved as {pdf_filename}")
         plt.show()
 
         # Plot heatmap of B_est
@@ -263,9 +270,9 @@ def compute_metrics(value, Trials, dim, fs, T, dt, A_true, B_true, input_type, t
         plt.ylabel('Dimension')
         plt.title('$B_{est}$', fontname='cmb10')
         plt.tight_layout()
-        svg_filename = os.path.join(results_dir, f"{__file__.split('/')[-1].split('.')[0]}_B_est_heatmap_{value}.svg")
-        plt.savefig(svg_filename)
-        print(f"Heatmap saved as {svg_filename}")
+        pdf_filename = os.path.join(results_dir, f"{__file__.split('/')[-1].split('.')[0]}_B_est_heatmap_{input_type}.pdf")
+        plt.savefig(pdf_filename)
+        print(f"Heatmap saved as {pdf_filename}")
         plt.show()
                         
         L=int(fs*T*1.0)
@@ -278,7 +285,7 @@ def compute_metrics(value, Trials, dim, fs, T, dt, A_true, B_true, input_type, t
         
         error_cost_trial.append(abs(cost_true - cost_est))
         
-        x_T = np.array([0, 0, 50, 50, 0]).reshape(-1,1)
+        x_T = np.array([0, 0, 25, 25, 0]).reshape(-1,1)
         u_star = np.zeros([dim,0])
 
         W_inv = scipy.linalg.inv(W_est)
@@ -298,15 +305,18 @@ def compute_metrics(value, Trials, dim, fs, T, dt, A_true, B_true, input_type, t
         # Plot time series of x with dimension information
         set_default_plot_settings(font_size=14, dpi=200)
         fig, axs = plt.subplots(5, 1, figsize=(3.5, 2.5), sharex=True)
+        t = np.arange(0, L/fs+dt, dt)
         for d in range(dim):
-            axs[d].plot(np.arange(0, L/fs+dt, dt), x_c[d, :], label=f'$x_{d+1}$', linewidth=2, color='blue')
+            axs[d].plot(t, x_c[d, :], label=f'$x_{d+1}$', linewidth=2, color='blue')
             axs[d].grid(True)
-            axs[d].set_ylim(-5, 70)
-            axs[d].set_xlim(0, L/fs+0.1)
+            axs[d].set_ylim(-50, 50)           # 下限を-10に設定
+            axs[d].set_autoscale_on(False)     # オートスケールを無効化（重要）
+            axs[d].set_xlim(0, L/fs + 0.1)
             axs[d].set_ylabel(f'$x_{d+1}$', fontname='cmb10')
+            axs[d].set_yticks([0, 50])
         for d in range(dim):
-            axs[d].scatter(np.arange(0, L/fs+dt, dt)[-1], x_T[d], color='white', edgecolor='black', zorder=1, s=20)  # Mark the final time point
-                
+            axs[d].scatter(t[-1], float(x_T[d]), color='white', edgecolor='black', zorder=1, s=20)  # Mark the final time point
+            
         axs[dim-1].set_xlabel('Time (s)')
         
         plt.suptitle("Controlled State Process", y=1.01)
@@ -320,9 +330,9 @@ def compute_metrics(value, Trials, dim, fs, T, dt, A_true, B_true, input_type, t
         # fig.legend(handles, labels, loc='center left', bbox_to_anchor=(1.0, 0.5), ncol=2)
 
         # Save the figure as an SVG file
-        svg_filename = os.path.join(results_dir, f"{__file__.split('/')[-1].split('.')[0]}_optimal_control_test_combined_{value}.svg")
-        fig.savefig(svg_filename, bbox_inches='tight')
-        print(f"Figure saved as {svg_filename}")
+        pdf_filename = os.path.join(results_dir, f"{__file__.split('/')[-1].split('.')[0]}_optimal_control_test_combined_{input_type}.pdf")
+        fig.savefig(pdf_filename, bbox_inches='tight')
+        print(f"Figure saved as {pdf_filename}")
         plt.show()
 
         fig, axs = plt.subplots(1, 1, figsize=(2.5, 2.5))
@@ -333,18 +343,18 @@ def compute_metrics(value, Trials, dim, fs, T, dt, A_true, B_true, input_type, t
         axs.bar(range(1, dim + 1), squared_time_integral_u, color="blue", edgecolor="black", linewidth=1.0)
         axs.set_xlabel('$u_i$', fontname='cmb10')
         axs.set_ylabel(r'Integrated Value')
-        axs.set_ylim(0, 1.0e2)
+        axs.set_ylim(0, 100)  # use 100 instead of 1e2
         axs.set_xticks(range(1, dim + 1))  # Ensure all xticks are displayed
-        
+
+        axs.yaxis.set_major_formatter(FormatStrFormatter('%.0f'))  # show plain numbers (e.g., 100 instead of 1e2)
+
         plt.tight_layout()
-        plt.title("Control Input Strength", y=1.01)
-        
-        # Save the figure as an SVG file
-        svg_filename = os.path.join(results_dir, f"{__file__.split('/')[-1].split('.')[0]}_optimal_control_integrated_strength_{value}.svg")
-        fig.savefig(svg_filename, bbox_inches='tight')
-        print(f"Figure saved as {svg_filename}")
+        plt.title("Control Input Strength", y=1.01, fontsize=14)
+        # Save the figure as a PDF file
+        pdf_filename = os.path.join(results_dir, f"{__file__.split('/')[-1].split('.')[0]}_optimal_control_integrated_strength_{input_type}.pdf")
+        fig.savefig(pdf_filename, bbox_inches='tight')
+        print(f"Figure saved as {pdf_filename}")
         plt.show()
-                
         Phi_true = np.hstack([A_true, B_true])
                         
         frobenius_norm_A = np.linalg.norm(A_true - A_est, 'fro') **2
@@ -369,12 +379,11 @@ input_values = np.arange(1, 50, 0.1)
 # 
 
 # input_values = np.arange(0,10,5)
-input_values = [1e-20,1e20]
 Trials = 1
 results = []
 plt.figure(figsize=(10,4))
-for value in tqdm(input_values):
-    results.append(compute_metrics(value, Trials, dim, fs, T, dt, A_true, B_true, input_type, test_on=True))
+for input_type in ["passive","impulse"]:
+    results.append(compute_metrics(1e20, Trials, dim, fs, T, dt, A_true, B_true, input_type, test_on=True))
 plt.show()
 
 
@@ -417,6 +426,7 @@ data_to_save = {
 
 # Ensure the results directory exists
 import os
+from matplotlib.ticker import FormatStrFormatter
 filename = os.path.join(results_dir, f"{__file__.split('/')[-1].split('.')[0]}_{input_type}_dim{dim}.pkl")
 with open(filename, 'wb') as f:
     pickle.dump(data_to_save, f)
@@ -444,59 +454,59 @@ base_fs = loaded_data['base_fs']
 #%%
 set_default_plot_settings(font_size=14, dpi=200, line_width=3)
 # Plot Frobenius Norm of A
-plt.figure(figsize=(2.5, 2))
-plt.bar(["1e-20", "1e20"], fros_A, color="blue", edgecolor="black", linewidth=1.0)
+plt.figure(figsize=(2.5, 2.5))
+plt.bar(["0", "1e20"], fros_A, color="blue", edgecolor="black", linewidth=1.0)
 plt.xlabel('Input Intensity')
 plt.ylabel(r'Error of $A$')
 plt.yscale('log')
 plt.tight_layout()
 
-# Save the figure as an SVG file
-svg_filename = os.path.join(results_dir, f"{__file__.split('/')[-1].split('.')[0]}_{input_type}_fros_A_dim{dim}.svg")
-plt.savefig(svg_filename)
-print(f"Figure saved as {svg_filename}")
+# Save the figure as a PDF file
+pdf_filename = os.path.join(results_dir, f"{__file__.split('/')[-1].split('.')[0]}_{input_type}_fros_A_dim{dim}.pdf")
+plt.savefig(pdf_filename)
+print(f"Figure saved as {pdf_filename}")
 plt.show()
 
-# Plot Frobenius Norm of B
-plt.figure(figsize=(2.5, 2))
-plt.bar(["1e-20", "1e20"], fros_B, color="blue", edgecolor="black", linewidth=1.0)
-plt.xlabel('Input Intensity')
-plt.ylabel(r'Error of $B$')
-plt.yscale('log')
-plt.tight_layout()
+# # Plot Frobenius Norm of B
+# plt.figure(figsize=(2.5, 2))
+# plt.bar(["0", "1e20"], fros_B, color="blue", edgecolor="black", linewidth=1.0)
+# plt.xlabel('Input Intensity')
+# plt.ylabel(r'Error of $B$')
+# plt.yscale('log')
+# plt.tight_layout()
 
-# Save the figure as an SVG file
-svg_filename = os.path.join(results_dir, f"{__file__.split('/')[-1].split('.')[0]}_{input_type}_fros_B_dim{dim}.svg")
-plt.savefig(svg_filename)
-print(f"Figure saved as {svg_filename}")
-plt.show()
+# # Save the figure as a PDF file
+# pdf_filename = os.path.join(results_dir, f"{__file__.split('/')[-1].split('.')[0]}_{input_type}_fros_B_dim{dim}.pdf")
+# plt.savefig(pdf_filename)
+# print(f"Figure saved as {pdf_filename}")
+# plt.show()
 
 # Plot Frobenius Norm of W
-plt.figure(figsize=(2.5, 2))
-plt.bar(["1e-20", "1e20"], fros_W, color="blue", edgecolor="black", linewidth=1.0)
+plt.figure(figsize=(2.5, 2.5))
+plt.bar(["0", "1e20"], fros_W, color="blue", edgecolor="black", linewidth=1.0)
 plt.xlabel('Input Intensity')
 plt.ylabel(r'Error of $W$')
 plt.yscale('log')
 plt.tight_layout()
 
-# Save the figure as an SVG file
-svg_filename = os.path.join(results_dir, f"{__file__.split('/')[-1].split('.')[0]}_{input_type}_fros_W_dim{dim}.svg")
-plt.savefig(svg_filename)
-print(f"Figure saved as {svg_filename}")
+# Save the figure as a PDF file
+pdf_filename = os.path.join(results_dir, f"{__file__.split('/')[-1].split('.')[0]}_{input_type}_fros_W_dim{dim}.pdf")
+plt.savefig(pdf_filename)
+print(f"Figure saved as {pdf_filename}")
 plt.show()
 
 # Plot Error of Control Cost
-plt.figure(figsize=(2.5, 2))
-plt.bar(["1e-20", "1e20"], error_cost, color="blue", edgecolor="black", linewidth=1.0)
+plt.figure(figsize=(2.5, 2.5))
+plt.bar(["0", "1e20"], error_cost, color="blue", edgecolor="black", linewidth=1.0)
 plt.xlabel('Input Intensity')
 plt.ylabel(r'Error of Cost')
 plt.yscale('log')
 plt.tight_layout()
 
-# Save the figure as an SVG file
-svg_filename = os.path.join(results_dir, f"{__file__.split('/')[-1].split('.')[0]}_{input_type}_error_cost_dim{dim}.svg")
-plt.savefig(svg_filename)
-print(f"Figure saved as {svg_filename}")
+# Save the figure as a PDF file
+pdf_filename = os.path.join(results_dir, f"{__file__.split('/')[-1].split('.')[0]}_{input_type}_error_cost_dim{dim}.pdf")
+plt.savefig(pdf_filename)
+print(f"Figure saved as {pdf_filename}")
 plt.show()
 
 # %%
