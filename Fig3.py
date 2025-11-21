@@ -1,304 +1,163 @@
 #%%
-import sys
-import os
-
-sys.path.append(os.path.join(os.path.dirname(__file__), "lib"))
-from plot_heatmap import plot_heatmap
-from set_default_plot_settings import set_default_plot_settings
+# Ellipsoid plot image
+###############
 
 import numpy as np
 import matplotlib.pyplot as plt
 import scipy
-import scipy.linalg
-import numpy as np
-import scipy
-import os
+import pandas as pd
 from sklearn.decomposition import PCA
-import networkx as nx
+from mpl_toolkits.mplot3d import Axes3D
+from matplotlib.patches import Ellipse
+from scipy.spatial.transform import Rotation as R
+import os
 
-results_dir = "results"
-fs = 1000
-dt = 1/fs
+plt.rcParams['font.family'] = 'Arial'
+plt.rcParams['mathtext.default'] = 'regular'
+def plot_rotated_ellipsoid_with_half_axes(a, b, c, center=(0.0, 0.0, 0.0), phi=0, theta=0, psi=0, xlim=(-10,10), ylim=(-10,10), zlim=(-10,10), save_name=None):
+    """
+    3次元楕円体（回転あり）と各軸方向の半分だけ矢印を描画
+    a, b, c : 楕円体の半径（主軸長）
+    phi, theta, psi : ZYXオイラー角 [rad]（回転）
+    center : 楕円体中心 (x0, y0, z0)
+    save_name : 保存するファイル名（拡張子なし、svgで保存）
+    """
 
-#%%
-mode_freq = [10,40]
-dim = len(mode_freq)*2
+    # 回転行列
+    rot = R.from_euler('zyx', [phi, theta, psi]).as_matrix()
 
-diagB = np.ones(dim)
-B_true = np.diag(diagB)
+    # 楕円体の点群生成
+    u = np.linspace(0, 2 * np.pi, 50)
+    v = np.linspace(0, np.pi, 25)
+    x = a * np.outer(np.cos(u), np.sin(v))
+    y = b * np.outer(np.sin(u), np.sin(v))
+    z = c * np.outer(np.ones_like(u), np.cos(v))
 
-desired_eigenvalues = []
-for fIndex, f in enumerate(mode_freq):
-    desired_eigenvalues.append([-fIndex*50-(2*np.pi*f)*1j, -fIndex*50+(2*np.pi*f)*1j])
+    # 回転・平行移動
+    xyz = np.stack([x, y, z], axis=-1)
+    xyz_rot = np.einsum('ij,klj->kli', rot, xyz)
+    x_rot = xyz_rot[..., 0] + center[0]
+    y_rot = xyz_rot[..., 1] + center[1]
+    z_rot = xyz_rot[..., 2] + center[2]
 
-print("Desired eigenvalues:", desired_eigenvalues)
-
-A_continuous = np.zeros([dim, dim])
-# Construct the continuous-time matrix A
-for index, desired_eigenvalue in enumerate(desired_eigenvalues):
-    A_continuous[2*index:2*(index+1), 2*index:2*(index+1)] = np.array([[desired_eigenvalue[0].real, desired_eigenvalue[0].imag],[desired_eigenvalue[1].imag, desired_eigenvalue[1].real]])# Calculate the eigenvalues of the continuous-time matrix
-eigenvalues, _ = np.linalg.eig(A_continuous)
-
-A_discrete = scipy.linalg.expm(A_continuous * dt)
-
-A_discrete[0,2] = -0.01
-A_discrete[1,3] = 0.01
-A_discrete[2,0] = 0.01
-A_discrete[3,0] = -0.01
-A_discrete[2,1] = 0.01
-A_discrete[3,1] = -0.02    
-
-eigenvalues, eigenvectors = np.linalg.eig(A_continuous)
-
-print("Eigenvalues of the continuous-time matrix A:")
-print("real:", eigenvalues.real)
-print("imag:", eigenvalues.imag/(2*np.pi))
-
-# Calculate and print the eigenvalues of the discrete-time matrix A
-eigenvalues_discrete, eigenvectors_discrete = np.linalg.eig(A_discrete)
-print("Eigenvalues of the discrete-time matrix A:", eigenvalues_discrete)
-# Display the eigenvalues of the discrete-time matrix A in exponential form
-magnitudes = np.abs(eigenvalues_discrete)
-angles = np.angle(eigenvalues_discrete)
-
-print("Magnitudes of the eigenvalues of the discrete-time matrix A:", magnitudes)
-print("Angles of the eigenvalues of the discrete-time matrix A (in radians):", angles)
-
-# Plot heatmap of A_discrete
-set_default_plot_settings(font_size=24, dpi=200)
-plt.figure(figsize=(5, 5))
-plt.imshow(A_discrete, cmap='viridis', interpolation='nearest', vmin=-0.4, vmax=0.4)
-
-# Set ticks at the middle of each element
-plt.xticks(ticks=np.arange(A_discrete.shape[1]), labels=range(1, A_discrete.shape[1] + 1))
-plt.yticks(ticks=np.arange(A_discrete.shape[0]), labels=range(1, A_discrete.shape[0] + 1))
-
-# Set labels
-plt.xlabel('Dimension')
-plt.ylabel('Dimension')
-
-# Display the values on the heatmap
-for i in range(A_discrete.shape[0]):
-    for j in range(A_discrete.shape[1]):
-        value = A_discrete[i, j]
-        if value==0:
-            plt.text(j, i, f"0.00", ha='center', va='center', color='black', fontsize=20)
-        elif abs(value) < 1e-2:
-            plt.text(j, i, f"{value:.0e}", ha='center', va='center', color='black', fontsize=20)
-        else:
-            plt.text(j, i, f"{value:.2f}", ha='center', va='center', color='black', fontsize=20)
-
-plt.tight_layout()
-
-# Save the heatmap as an SVG file
-heatmap_filename = os.path.join(results_dir, f"{__file__.split('/')[-1].split('.')[0]}_A_discrete_heatmap_dim{dim}.svg")
-plt.savefig(heatmap_filename)
-print(f"Heatmap saved as {heatmap_filename}")
-
-# Create a directed graph from A_discrete
-G = nx.DiGraph(A_discrete)
-
-# Relabel nodes to start from 1
-mapping = {i: i + 1 for i in range(A_discrete.shape[0])}
-G = nx.relabel_nodes(G, mapping)
-
-# Plot the directed graph
-plt.figure(figsize=(5, 4.8))
-pos = nx.spring_layout(G)  # positions for all nodes
-
-# Draw the nodes and edges
-nx.draw_networkx_nodes(G, pos, node_size=600, node_color='skyblue')
-nx.draw_networkx_edges(G, pos, edgelist=G.edges(), arrowstyle='-|>', arrowsize=20)
-nx.draw_networkx_labels(G, pos, font_size=20)
-
-# Add a black border around the plot with thicker lines
-plt.gca().spines['top'].set_color('black')
-plt.gca().spines['top'].set_linewidth(2)
-plt.gca().spines['bottom'].set_color('black')
-plt.gca().spines['bottom'].set_linewidth(2)
-plt.gca().spines['left'].set_color('black')
-plt.gca().spines['left'].set_linewidth(2)
-plt.gca().spines['right'].set_color('black')
-plt.gca().spines['right'].set_linewidth(2)
-
-# Save the directed graph as an SVG file with minimal padding
-graph_filename = os.path.join(results_dir, f"{__file__.split('/')[-1].split('.')[0]}_directed_graph.svg")
-plt.savefig(graph_filename, format='svg', bbox_inches='tight', pad_inches=0.05)
-print(f"Directed graph saved as {graph_filename}")
-plt.show()
-
-#%%
-A_true = A_discrete
-Trials = 100
-T = 10
-sigma = 1e-32
-
-for input_type in ["passive", "impulse", "cos"]:
-    xi_trials = np.zeros((Trials, dim, fs*T))
-    for trial in range(Trials):
-        for i in range(1, fs*T):
-            xi_trials[trial, :, i-1] = np.random.normal(0, sigma, dim)
-            
-    x0 = np.ones([dim,1])
-    x = np.zeros([dim, fs*T])
-    xi = np.zeros([dim, fs*T])
-    x[:,0] = x0[:,0]
-
-    u0 = np.array([0.3,0.3,0.6,0.6])
-    if input_type=="passive": #Passive
-        w = np.zeros(fs*T)
-        u = np.outer(u0, w)
-    if input_type=="impulse": #Impulse
-        w = np.zeros(fs*T)
-        w[fs * T - fs//(mode_freq[0])//2] = 1
-        u = np.outer(u0, w)
-    elif input_type=="step": #Step
-        w = np.ones(fs*T)*1
-        u = np.outer(u0, w)
-    elif input_type=="cos": #Cosine
-        omega = 2*np.pi*60
-        u = np.zeros([dim, fs*T])
-        w = np.cos(omega * np.arange(0, T, dt))*0.7e-1
-        u = np.outer(u0, w)        
-            
-    for i in range(1, fs*T):
-        xi[:,i-1] = np.random.normal(0, sigma, dim)
-        if i >= fs * T - fs//(mode_freq[0])//2:
-            x[:,i] = A_true @ x[:,i-1] + B_true @ u[:,i-1] + xi[:,i-1]
-        else:
-            x[:,i] = A_true @ x[:,i-1] + xi[:,i-1]
-        
-    X_ = x[:, -fs//(mode_freq[0]):]
-    U_ = u[:, -fs//(mode_freq[0]):]
-    
-    X = X_[:,:-1]
-    U = U_[:,:-1]
-    Y = X_[:,1:]
-            
-    Z = np.vstack([X, U])
-
-    Phi_est = Y@scipy.linalg.pinv(Z)
-    A_est = Phi_est[:,:dim]
-    B_est = Phi_est[:,dim:]
-    
-    # Plot time series of X
-    set_default_plot_settings(font_size=24, dpi=200)
-    fig, axs = plt.subplots(4, 1, figsize=(5, 4), sharex=True)
-    colors = plt.cm.viridis(np.linspace(0, 1, X.shape[1]))
-
-    lim = 3
-    for d in range(dim):
-        for t in range(X.shape[1] - 1):
-            axs[d % 4].plot(np.arange(t, t + 2) * dt, X[d, t:t + 2], color=colors[t], linewidth=2)
-        axs[d % 4].set_ylabel(f'$x_{d+1}$')
-        axs[d % 4].grid(True)
-        axs[d % 4].set_yticks([])
-        axs[d % 4].set_xticks([])
-        axs[d % 4].set_ylim(-lim, lim)
-        
-    axs[-1].set_xlabel('Time')
-    plt.tight_layout(pad=0.4, rect=[0, 0, 1, 0.96])
-
-    # Save the time series plot as an SVG file
-    time_series_filename = os.path.join(results_dir, f"{__file__.split('/')[-1].split('.')[0]}_time_series_{input_type}.svg")
-    plt.savefig(time_series_filename, bbox_inches='tight', pad_inches=0.05)
-    print(f"Time series plot saved as {time_series_filename}")
-    plt.show()
-
-    set_default_plot_settings(font_size=18, dpi=200)
-    # Perform PCA on X
-    pca = PCA(n_components=4)
-    X_pca = pca.fit_transform(X.T)
-
-    # Plot the PCA results in 3D
-    fig = plt.figure(figsize=(5, 5))
+    fig = plt.figure(figsize=(7, 7))
     ax = fig.add_subplot(111, projection='3d')
-    sc = ax.scatter(X_pca[:, 0], X_pca[:, 1], X_pca[:, 2], c=np.arange(X_pca.shape[0]), cmap='viridis', marker='o', s=5)
-    cbar = plt.colorbar(sc, shrink=0.5, pad=0.2, label='Time Step')  # Adjust the shrink parameter to shorten the colorbar
-    cbar.set_ticks([])  # Remove ticks from the colorbar
-    ax.set_xlabel('PC 1', labelpad=-12)
-    ax.set_ylabel('PC 2', labelpad=-12)
-    ax.set_zlabel('PC 3', labelpad=-12)
+    # ワイヤーフレームで楕円体を描画
+    ax.plot_wireframe(x_rot, y_rot, z_rot, color='gray', linewidth=1, alpha=0.7)
 
-    lim = 0.9
-    
-    # Rotate axis labels
-    ax.xaxis.label.set_rotation(-18)
-    ax.yaxis.label.set_rotation(54)
-    ax.zaxis.label.set_rotation(90)
-    ax.set_xlim(-lim, lim)
-    ax.set_ylim(-lim, lim)
-    ax.set_zlim(-lim, lim)
-    ax.set_xticklabels([])
-    ax.set_yticklabels([])
-    ax.set_zticklabels([])
-    ax.grid(True)
-    plt.tight_layout(pad=0.1, rect=[0, 0, 1, 1])
+    # 主軸方向ベクトル
+    axes = np.array([[a,0,0],[0,b,0],[0,0,c]])
+    axes_rot = rot @ axes.T
 
-    # Save the PCA plot as an SVG file
-    pca_filename = os.path.join(results_dir, f"{__file__.split('/')[-1].split('.')[0]}_PCA_X_{input_type}_{X.shape[1]}.svg")
-    plt.savefig(pca_filename, bbox_inches='tight', pad_inches=0.05)
-    print(f"PCA plot saved as {pca_filename}")
-    plt.show()
-         
-    set_default_plot_settings(font_size=24, dpi=200)
-    plt.figure(figsize=(5, 5))
-    plt.imshow(A_est, cmap='viridis', interpolation='nearest', vmin=-0.4, vmax=0.4)
+    # 各軸に半分だけ矢印（headなし）
+    for i in range(3):
+        ax.plot([center[0], center[0] + axes_rot[0, i]],
+                [center[1], center[1] + axes_rot[1, i]],
+                [center[2], center[2] + axes_rot[2, i]],
+                color='k', linewidth=2)
 
-    # Set ticks at the middle of each element
-    plt.xticks(ticks=np.arange(A_est.shape[1]), labels=range(1, A_est.shape[1] + 1))
-    plt.yticks(ticks=np.arange(A_est.shape[0]), labels=range(1, A_est.shape[0] + 1))
+    ax.set_xlim(xlim)
+    ax.set_ylim(ylim)
+    ax.set_zlim(zlim)
+    ax.tick_params(labelbottom=False, labelleft=False, labelright=False, labeltop=False)
+    ax.set_box_aspect([1,1,1])
+    ax.grid(True, linestyle='--', alpha=0.5)
+    plt.tight_layout()
 
-    # Set labels
-    plt.xlabel('Dimension')
-    plt.ylabel('Dimension')
+    if save_name is not None:
+        results_dir = "results"
+        os.makedirs(results_dir, exist_ok=True)
+        program_name = os.path.splitext(os.path.basename(__file__))[0]
+        file_path = os.path.join(results_dir, f"{program_name}_{save_name}.svg")
+        plt.savefig(file_path, format="svg")
+        plt.close(fig)
+    else:
+        plt.show()
 
-    # Display the values on the heatmap
-    for i in range(A_est.shape[0]):
-        for j in range(A_est.shape[1]):
-            value = A_est[i, j]
-            if value == 0:
-                plt.text(j, i, f"0.00", ha='center', va='center', color='black', fontsize=18)
-            elif abs(value) < 1e-2:
-                plt.text(j, i, f"0.00", ha='center', va='center', color='black', fontsize=18)
-            else:
-                plt.text(j, i, f"{value:.2f}", ha='center', va='center', color='black', fontsize=18)
+vals_passive=[1, 1, 8]
+vals_perturbation=[3, 3, 5]
 
-    plt.tight_layout(pad=0.05)
+lim_value = 5
+# 例: passive
+plot_rotated_ellipsoid_with_half_axes(
+    a=vals_passive[0], b=vals_passive[1], c=vals_passive[2],
+    center=(0,0,0), phi=np.deg2rad(30), theta=np.deg2rad(20), psi=np.deg2rad(10),
+    xlim=(-lim_value, lim_value), ylim=(-lim_value, lim_value), zlim=(-lim_value, lim_value),
+    save_name="passive"
+)
 
-    # Save the heatmap as an SVG file
-    heatmap_filename = os.path.join(results_dir, f"{__file__.split('/')[-1].split('.')[0]}_A_est_heatmap_{input_type}_dim{dim}.svg")
-    plt.savefig(heatmap_filename, bbox_inches='tight', pad_inches=0.05)
-    print(f"Heatmap saved as {heatmap_filename}")
-    
-    set_default_plot_settings(font_size=24, dpi=200)
-    plt.figure(figsize=(5, 5))
-    plt.imshow(np.abs(A_est - A_true), cmap='Reds', interpolation='nearest', vmin=0, vmax=1)
+# 例: perturbation
+plot_rotated_ellipsoid_with_half_axes(
+    a=vals_perturbation[0], b=vals_perturbation[1], c=vals_perturbation[2],
+    center=(0,0,0), phi=np.deg2rad(30), theta=np.deg2rad(20), psi=np.deg2rad(10),
+    xlim=(-lim_value, lim_value), ylim=(-lim_value, lim_value), zlim=(-lim_value, lim_value),
+    save_name="perturbation"
+)
 
-    # Set ticks at the middle of each element
-    plt.xticks(ticks=np.arange(A_est.shape[1]), labels=range(1, A_est.shape[1] + 1))
-    plt.yticks(ticks=np.arange(A_est.shape[0]), labels=range(1, A_est.shape[0] + 1))
+lim_value = 8
+# 例: passive (逆数 × 10)
+plot_rotated_ellipsoid_with_half_axes(
+    a=1/vals_passive[0]*10, b=1/vals_passive[1]*10, c=1/vals_passive[2]*10,
+    center=(0,0,0), phi=np.deg2rad(30), theta=np.deg2rad(20), psi=np.deg2rad(10),
+    xlim=(-lim_value, lim_value), ylim=(-lim_value, lim_value), zlim=(-lim_value, lim_value),
+    save_name="passive_inv"
+)
 
-    # Set labels
-    plt.xlabel('Dimension')
-    plt.ylabel('Dimension')
-
-    # Display the values on the heatmap
-    for i in range(A_est.shape[0]):
-        for j in range(A_est.shape[1]):
-            value = np.abs(A_est[i, j] - A_true[i, j])
-            if value == 0:
-                plt.text(j, i, f"0.00", ha='center', va='center', color='black', fontsize=18)
-            elif abs(value) < 1e-2:
-                plt.text(j, i, f"0.00", ha='center', va='center', color='black', fontsize=18)
-            else:
-                plt.text(j, i, f"{value:.2f}", ha='center', va='center', color='black', fontsize=18)
-
-    plt.tight_layout(pad=0.05)
-
-    # Save the heatmap as an SVG file
-    heatmap_filename = os.path.join(results_dir, f"{__file__.split('/')[-1].split('.')[0]}_A_error_heatmap_{input_type}_dim{dim}.svg")
-    plt.savefig(heatmap_filename, bbox_inches='tight', pad_inches=0.05)
-    print(f"Heatmap saved as {heatmap_filename}")
-
+# 例: perturbation (逆数 × 10)
+plot_rotated_ellipsoid_with_half_axes(
+    a=1/vals_perturbation[0]*10, b=1/vals_perturbation[1]*10, c=1/vals_perturbation[2]*10,
+    center=(0,0,0), phi=np.deg2rad(30), theta=np.deg2rad(20), psi=np.deg2rad(10),
+    xlim=(-lim_value, lim_value), ylim=(-lim_value, lim_value), zlim=(-lim_value, lim_value),
+    save_name="perturbation_inv"
+)
 # %%
+# 単一周波数の時系列 + ノイズ（振幅を小さく）
+t = np.linspace(0, 1, 500)
+freqs = [3, 7]  # Hz
+np.random.seed(0)
+noise_level = 0.3
+amp_single = 0.2  # 振幅を小さく
+signal = sum(amp_single * np.sin(2 * np.pi * f * t) for f in freqs) + noise_level * np.random.randn(len(t))
+
+fig1, ax1 = plt.subplots(figsize=(7, 3))
+ax1.plot(t, signal, color='k', linewidth=2)
+ax1.grid(True, linestyle='--', alpha=0.5)
+ax1.set_xticks([])
+ax1.set_yticks([])
+ax1.set_ylim(-2, 2)
+plt.tight_layout()
+results_dir = "results"
+os.makedirs(results_dir, exist_ok=True)
+program_name = os.path.splitext(os.path.basename(__file__))[0]
+file_path1 = os.path.join(results_dir, f"{program_name}_simple_freq.svg")
+plt.savefig(file_path1, format="svg")
+plt.close(fig1)
+
+# 複数周波数の時系列 + ノイズ
+freqs_multi = [3, 7, 13, 20]
+signal_multi = sum(np.sin(2 * np.pi * f * t) for f in freqs_multi) + noise_level * np.random.randn(len(t))
+
+fig2, ax2 = plt.subplots(figsize=(7, 3))
+ax2.plot(t, signal_multi, color='k', linewidth=2)
+ax2.grid(True, linestyle='--', alpha=0.5)
+ax2.set_xticks([])
+ax2.set_yticks([])
+ax1.set_ylim(-2, 2)
+plt.tight_layout()
+file_path2 = os.path.join(results_dir, f"{program_name}_multi_freq.svg")
+plt.savefig(file_path2, format="svg")
+plt.close(fig2)
+
+freqs_multi = [13, 20]
+signal_multi = sum(np.sin(2 * np.pi * f * t) for f in freqs_multi)
+
+fig2, ax2 = plt.subplots(figsize=(7, 3))
+ax2.plot(t, signal_multi, color='k', linewidth=2)
+ax2.grid(True, linestyle='--', alpha=0.5)
+ax2.set_xticks([])
+ax2.set_yticks([])
+ax1.set_ylim(-2, 2)
+plt.tight_layout()
+file_path2 = os.path.join(results_dir, f"{program_name}_u.svg")
+plt.savefig(file_path2, format="svg")
+plt.close(fig2)
